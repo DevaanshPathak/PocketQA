@@ -4,17 +4,19 @@ This repository proves one claim only: Android `AccessibilityService` can read t
 Semantics nodes produced by a real Flutter grocery app and act on them.
 
 - `bug_app/` is the actual five-bug PocketQA testbed.
-- `controller/` is a native Kotlin app that logs the testbed's Semantics tree and
-  runs one deterministic, safe script through standard Material widgets.
+- `controller/` is the PocketQA native Kotlin prototype. Its accessibility service
+  launches the testbed, executes five deterministic checks, and renders a report.
 
-The script deliberately avoids triggering the planted failures:
+The **Open buggy app and run 5 tests** button checks:
 
-1. Find and tap **Shopping cart** on the catalog.
-2. Find and tap **ORDER NOW** in the empty cart.
-3. Find and tap the first `android.widget.EditText` semantic node (the **Full Name** field)
-   to open the keyboard and shrink the checkout viewport.
-4. Scroll checkout with node-level `ACTION_SCROLL_FORWARD` when Flutter exposes it,
-   otherwise use the service's `dispatchGesture` swipe fallback.
+1. Only two of three product semantics render after the null-text failure.
+2. Two decrement taps produce a cart quantity of `-1`.
+3. Empty checkout submission produces no validation-error semantics.
+4. **Place Order** remains enabled immediately after a valid submission.
+5. `FREEZE` + **APPLY** produces no target UI update for at least two seconds.
+
+The freeze check runs last. PocketQA then returns to the foreground and displays
+the evidence collected for every detected bug.
 
 ## Build
 
@@ -53,16 +55,13 @@ adb install -r controller\build\outputs\apk\debug\controller-debug.apk
 
 ## 30-second recording script
 
-1. Start recording with the phone and laptop terminal both visible.
-2. Open **PocketQA Semantics Proof**, tap **Enable Accessibility Service**, and
-   enable **PocketQA Semantics Reader**.
-3. Run `adb logcat -c`, followed by `adb logcat -s PocketQA`.
-4. Launch **PocketQA Testbed (Buggy)**. Do not touch the grocery app.
-5. Capture the terminal showing labeled nodes and each `ACTION` line while the
-   phone autonomously opens Cart, opens Checkout, focuses Full Name, and scrolls.
-6. End on `DEMO COMPLETE: real Flutter Semantics drove all actions`.
+1. Open PocketQA and enable **PocketQA Semantics Reader** if needed.
+2. Tap **Open buggy app and run 5 tests**.
+3. Do not touch the emulator while PocketQA drives Catalog, Cart, and Checkout.
+4. PocketQA returns automatically after the final freeze check.
+5. End on the on-device **5/5 bugs found** report.
 
-To repeat, disable and re-enable the accessibility service, then relaunch the buggy app.
+To repeat, close the system ANR dialog if it appears, then press the test button again.
 
 ## Intentional scope
 

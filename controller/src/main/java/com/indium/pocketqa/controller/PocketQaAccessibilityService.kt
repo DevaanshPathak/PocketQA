@@ -1,146 +1,239 @@
 package com.indium.pocketqa.controller
 
 import android.accessibilityservice.AccessibilityService
-import android.accessibilityservice.GestureDescription
-import android.graphics.Path
+import android.content.Intent
+import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 
 class PocketQaAccessibilityService : AccessibilityService() {
-    private var step = DemoStep.OPEN_CART
-    private var lastTree: String? = null
+    private val handler = Handler(Looper.getMainLooper())
+    private var step = RunStep.IDLE
+    private var lastEventAt = 0L
 
     override fun onServiceConnected() {
-        step = DemoStep.OPEN_CART
-        lastTree = null
-        Log.i(TAG, "Service connected; waiting for PocketQA Testbed (Buggy)")
+        instance = this
+        Log.i(TAG, "PocketQA test service connected")
+    }
+
+    override fun onDestroy() {
+        if (instance === this) instance = null
+        super.onDestroy()
+    }
+
+    private fun beginRun() {
+        findings.clear()
+        running = true
+        step = RunStep.WAIT_CATALOG
+        launchTarget()
+        Log.i(TAG, "RUN STARTED: five deterministic bug checks")
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        if (event?.packageName?.toString() != TARGET_PACKAGE) return
+        if (!running || event?.packageName?.toString() != TARGET_PACKAGE) return
+        lastEventAt = System.currentTimeMillis()
         val root = rootInActiveWindow ?: return
         val snapshot = root.toSnapshot()
-        if (DemoPlanner.isCatalog(snapshot) && step != DemoStep.OPEN_CART) {
-            Log.i(TAG, "Catalog relaunched; resetting demo state")
-            step = DemoStep.OPEN_CART
-        }
-        if (step == DemoStep.COMPLETE) return
-        val formatted = TreeFormatter.format(snapshot)
-        if (formatted != lastTree) {
-            Log.i(TAG, "Flutter Semantics tree (${step.name}):\n$formatted")
-            lastTree = formatted
-        }
+        Log.d(TAG, "STATE ${step.name}:\n${TreeFormatter.format(snapshot)}")
 
-        when (val action = DemoPlanner.next(snapshot, step)) {
-            is DemoAction.Click -> {
-                val node = findByLabel(root, action.label) ?: return
-                Log.i(TAG, "ACTION ${step.name}: click label=\"${action.label}\"")
-                step = step.next()
-                node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-                node.recycle()
+        when (step) {
+            RunStep.WAIT_CATALOG -> handleCatalog(root, snapshot)
+            RunStep.WAIT_CART -> handleCart(root, snapshot)
+            RunStep.WAIT_CHECKOUT -> handleCheckout(root, snapshot)
+            RunStep.WAIT_RETURN_TO_CART -> handleFreeze(root, snapshot)
+            else -> Unit
+        }
+    }
+
+    private fun handleCatalog(root: AccessibilityNodeInfo, snapshot: SemanticNode) {
+        if (!snapshot.hasLabel("PocketQA Testbed (Buggy)")) return
+        val renderedProducts = snapshot.labels().count { it.contains('$') }
+        if (renderedProducts < 2) return
+        if (renderedProducts < 3) {
+            found("Third grocery item fails to render", "Only $renderedProducts of 3 product semantics rendered")
+        }
+        val add = findByPrefix(root, "Add ") ?: return
+        step = RunStep.WAIT_CART
+        add.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+        add.recycle()
+        handler.postDelayed({ clickFresh("Shopping cart") }, 700)
+    }
+
+    private fun handleCart(root: AccessibilityNodeInfo, snapshot: SemanticNode) {
+        if (!snapshot.hasLabel("Your Cart")) return
+        val decrease = findByLabel(root, "Decrease quantity") ?: return
+        step = RunStep.DECREMENTING
+        decrease.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+        decrease.recycle()
+        handler.postDelayed({ clickFresh("Decrease quantity") }, 450)
+        handler.postDelayed({
+            val current = rootInActiveWindow ?: return@postDelayed
+            val currentSnapshot = current.toSnapshot()
+            if (currentSnapshot.labels().any { it.lines().lastOrNull()?.trim() == "-1" }) {
+                found("Cart quantity goes below zero", "Observed cart quantity -1 after two decrement taps")
             }
-            DemoAction.ClickFirstEditable -> {
-                val node = findFirstEditable(root) ?: return
-                Log.i(TAG, "ACTION ${step.name}: click first semantic EditText")
-                step = step.next()
-                node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-                node.recycle()
+            step = RunStep.WAIT_CHECKOUT
+            clickFresh("ORDER NOW")
+        }, 950)
+    }
+
+    private fun handleCheckout(root: AccessibilityNodeInfo, snapshot: SemanticNode) {
+        if (!snapshot.hasLabel("Checkout")) return
+        val placeOrder = findByLabel(root, "Place Order") ?: return
+        step = RunStep.CHECKING_CHECKOUT
+        placeOrder.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+        placeOrder.recycle()
+        handler.postDelayed({
+            val afterEmptySubmit = rootInActiveWindow ?: return@postDelayed
+            val emptySnapshot = afterEmptySubmit.toSnapshot()
+            val hasValidation = emptySnapshot.labels().any { it.startsWith("Please enter") }
+            if (emptySnapshot.hasLabel("Checkout") && !hasValidation) {
+                found("Empty checkout has no validation errors", "Empty submission stayed on Checkout with no error semantics")
             }
-            DemoAction.Scroll -> {
-                step = DemoStep.COMPLETE
-                val node = findScrollable(root)
-                if (node != null) {
-                    Log.i(TAG, "ACTION SCROLL_CHECKOUT: node ACTION_SCROLL_FORWARD class=${node.className}")
-                    node.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
-                    node.recycle()
-                } else {
-                    Log.i(TAG, "ACTION SCROLL_CHECKOUT: dispatchGesture swipe fallback")
-                    dispatchScrollGesture()
+
+            val fields = findAllEditable(afterEmptySubmit)
+            listOf("PocketQA Tester", "1 Demo Street", "9999999999").forEachIndexed { index, value ->
+                fields.getOrNull(index)?.let { setText(it, value); it.recycle() }
+            }
+            val submit = findByLabel(afterEmptySubmit, "Place Order")
+            submit?.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+            val stillEnabled = submit?.isEnabled == true && submit.isClickable
+            submit?.recycle()
+            if (stillEnabled) {
+                found("Place Order remains enabled while processing", "Button remained enabled immediately after a valid submission")
+            }
+
+            step = RunStep.WAIT_RETURN_TO_CART
+            handler.postDelayed({ performGlobalAction(GLOBAL_ACTION_BACK) }, 100)
+        }, 650)
+    }
+
+    private fun handleFreeze(root: AccessibilityNodeInfo, snapshot: SemanticNode) {
+        if (!snapshot.hasLabel("Your Cart")) return
+        val promo = findAllEditable(root).firstOrNull() ?: return
+        setText(promo, "FREEZE")
+        promo.recycle()
+        step = RunStep.ENTERING_FREEZE
+        handler.postDelayed({
+            val apply = rootInActiveWindow?.let { findByLabel(it, "APPLY") } ?: return@postDelayed
+            step = RunStep.WAIT_FREEZE
+            val actionAt = System.currentTimeMillis()
+            apply.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+            apply.recycle()
+            handler.postDelayed({
+                val quietFor = System.currentTimeMillis() - lastEventAt
+                if (lastEventAt <= actionAt || quietFor >= 2000) {
+                    found("FREEZE promo makes the app unresponsive", "No target UI update for ${quietFor}ms after APPLY")
                 }
-                Log.i(TAG, "DEMO COMPLETE: real Flutter Semantics drove all actions")
-            }
-            null -> Unit
-        }
+                finishRun()
+            }, 2800)
+        }, 400)
     }
 
-    override fun onInterrupt() = Unit
+    private fun finishRun() {
+        running = false
+        step = RunStep.COMPLETE
+        Log.i(TAG, "RUN COMPLETE: ${findings.size}/5 bugs found")
+        startActivity(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    }
 
-    private fun findByLabel(node: AccessibilityNodeInfo, wanted: String): AccessibilityNodeInfo? {
-        val label = node.text?.toString() ?: node.contentDescription?.toString()
-        if (label == wanted && node.isClickable) return AccessibilityNodeInfo.obtain(node)
+    private fun launchTarget() {
+        val intent = packageManager.getLaunchIntentForPackage(TARGET_PACKAGE)
+            ?: return finishRun()
+        startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
+    }
+
+    private fun found(title: String, evidence: String) {
+        if (findings.none { it.title == title }) findings += BugFinding(title, evidence)
+        Log.i(TAG, "BUG FOUND: $title — $evidence")
+    }
+
+    private fun clickFresh(label: String) {
+        val root = rootInActiveWindow ?: return
+        val node = findByLabel(root, label) ?: return
+        node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+        node.recycle()
+    }
+
+    private fun setText(node: AccessibilityNodeInfo, text: String) {
+        val args = Bundle().apply {
+            putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
+        }
+        node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+    }
+
+    private fun findByLabel(node: AccessibilityNodeInfo, wanted: String): AccessibilityNodeInfo? =
+        findNode(node) { it.label() == wanted && it.isClickable }
+
+    private fun findByPrefix(node: AccessibilityNodeInfo, prefix: String): AccessibilityNodeInfo? =
+        findNode(node) { it.label()?.startsWith(prefix) == true && it.isClickable }
+
+    private fun findNode(node: AccessibilityNodeInfo, predicate: (AccessibilityNodeInfo) -> Boolean): AccessibilityNodeInfo? {
+        if (predicate(node)) return AccessibilityNodeInfo.obtain(node)
         for (index in 0 until node.childCount) {
             val child = node.getChild(index) ?: continue
-            val match = findByLabel(child, wanted)
+            val match = findNode(child, predicate)
             child.recycle()
             if (match != null) return match
         }
         return null
     }
 
-    private fun findScrollable(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
-        if (node.isScrollable) return AccessibilityNodeInfo.obtain(node)
+    private fun findAllEditable(node: AccessibilityNodeInfo): List<AccessibilityNodeInfo> = buildList {
+        if (node.className?.toString()?.endsWith("EditText") == true) add(AccessibilityNodeInfo.obtain(node))
         for (index in 0 until node.childCount) {
             val child = node.getChild(index) ?: continue
-            val match = findScrollable(child)
+            addAll(findAllEditable(child))
             child.recycle()
-            if (match != null) return match
         }
-        return null
     }
 
-    private fun findFirstEditable(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
-        if (node.isClickable && node.className?.toString()?.endsWith("EditText") == true) {
-            return AccessibilityNodeInfo.obtain(node)
-        }
-        for (index in 0 until node.childCount) {
-            val child = node.getChild(index) ?: continue
-            val match = findFirstEditable(child)
-            child.recycle()
-            if (match != null) return match
-        }
-        return null
-    }
+    private fun AccessibilityNodeInfo.label(): String? = text?.toString() ?: contentDescription?.toString()
 
-    private fun dispatchScrollGesture() {
-        val metrics = resources.displayMetrics
-        val x = metrics.widthPixels / 2f
-        val path = Path().apply {
-            moveTo(x, metrics.heightPixels * 0.75f)
-            lineTo(x, metrics.heightPixels * 0.35f)
-        }
-        val gesture = GestureDescription.Builder()
-            .addStroke(GestureDescription.StrokeDescription(path, 0, 450))
-            .build()
-        dispatchGesture(gesture, null, null)
-    }
-
-    private fun AccessibilityNodeInfo.toSnapshot(): SemanticNode {
-        val childSnapshots = buildList {
+    private fun AccessibilityNodeInfo.toSnapshot(): SemanticNode = SemanticNode(
+        className = className?.toString() ?: "unknown",
+        label = label(),
+        clickable = isClickable,
+        scrollable = isScrollable,
+        children = buildList {
             for (index in 0 until childCount) {
                 val child = getChild(index) ?: continue
                 add(child.toSnapshot())
                 child.recycle()
             }
         }
-        return SemanticNode(
-            className = className?.toString() ?: "unknown",
-            label = text?.toString() ?: contentDescription?.toString(),
-            clickable = isClickable,
-            scrollable = isScrollable,
-            children = childSnapshots
-        )
-    }
+    )
+
+    override fun onInterrupt() = Unit
 
     companion object {
         private const val TAG = "PocketQA"
         private const val TARGET_PACKAGE = "com.pocketqa.pocketqa"
+        private var instance: PocketQaAccessibilityService? = null
+        private val findings = mutableListOf<BugFinding>()
+        private var running = false
+
+        fun startTestRun(): Boolean {
+            val service = instance ?: return false
+            service.beginRun()
+            return true
+        }
+
+        fun currentReport(): String = QaReport.render(findings, running)
     }
 }
 
-private fun DemoStep.next(): DemoStep = when (this) {
-    DemoStep.OPEN_CART -> DemoStep.OPEN_CHECKOUT
-    DemoStep.OPEN_CHECKOUT -> DemoStep.FOCUS_NAME
-    DemoStep.FOCUS_NAME -> DemoStep.SCROLL_CHECKOUT
-    DemoStep.SCROLL_CHECKOUT, DemoStep.COMPLETE -> DemoStep.COMPLETE
+private enum class RunStep {
+    IDLE, WAIT_CATALOG, WAIT_CART, DECREMENTING, WAIT_CHECKOUT,
+    CHECKING_CHECKOUT, WAIT_RETURN_TO_CART, ENTERING_FREEZE, WAIT_FREEZE, COMPLETE
 }
+
+private fun SemanticNode.labels(): List<String> = buildList {
+    label?.let(::add)
+    children.forEach { addAll(it.labels()) }
+}
+
+private fun SemanticNode.hasLabel(wanted: String): Boolean = labels().any { it == wanted }

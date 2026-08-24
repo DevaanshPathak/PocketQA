@@ -28,11 +28,13 @@ class CartItemTile extends StatelessWidget {
         children: [
           IconButton(
             icon: const Icon(Icons.remove),
+            tooltip: 'Decrease quantity',
             onPressed: () => cart.decrementItem(productId),
           ),
           Text('${cartItem.quantity}'),
           IconButton(
             icon: const Icon(Icons.add),
+            tooltip: 'Increase quantity',
             onPressed: () => cart.addItem(cartItem.product),
           ),
         ],

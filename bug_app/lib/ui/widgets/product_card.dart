@@ -36,6 +36,7 @@ class ProductCard extends StatelessWidget {
           Text('\$${product.price.toStringAsFixed(2)}'),
           IconButton(
             icon: const Icon(Icons.add_shopping_cart),
+            tooltip: 'Add ${product.title} to cart',
             onPressed: () {
               Provider.of<CartProvider>(context, listen: false).addItem(product);
               ScaffoldMessenger.of(context).showSnackBar(
