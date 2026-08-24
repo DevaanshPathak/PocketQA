@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "790393020505",
+    "project_id": "pocketqa-test",
+    "storage_bucket": "pocketqa-test.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:790393020505:android:bca50ce31cd57cac0b9148",
+        "android_client_info": {
+          "package_name": "com.pocketqa.pocketqa"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDw3FfgnL0FoTo3-zn1Jn9PgGlacggloXI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
