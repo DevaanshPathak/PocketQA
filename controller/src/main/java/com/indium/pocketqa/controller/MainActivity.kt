@@ -829,7 +829,7 @@ class MainActivity : Activity() {
                 val located = VisualBugLocator.parseLocateResponse(response.text, width, height)
                 if (located !is VisualBugLocator.LocateResult.Success) {
                     runOnUiThread {
-                        visualHighlightStatus = "Gemma returned no usable coordinates: ${located.reason}"
+                        visualHighlightStatus = "Gemma returned no usable coordinates: ${(located as VisualBugLocator.LocateResult.Failed).reason}"
                         render(PocketQaSessionStore.snapshot())
                     }
                     return@runVisionPrompt
