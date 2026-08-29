@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../../../providers/auth_provider.dart';
 import '../../theme.dart';
 import '../../widgets/app_bottom_navigation.dart';
 import '../auth/login_screen.dart';
@@ -93,11 +95,17 @@ class WelcomeScreen extends StatelessWidget {
 
               // Action Buttons
               ElevatedButton(
-                onPressed: () {
-                  Navigator.pushReplacement(
-                    context,
-                    MaterialPageRoute(builder: (_) => const MainNavigationShell()),
-                  );
+                onPressed: () async {
+                  final auth = context.read<AuthProvider>();
+                  if (!auth.isAuthenticated) {
+                    await auth.signInAnonymously();
+                  }
+                  if (context.mounted) {
+                    Navigator.pushReplacement(
+                      context,
+                      MaterialPageRoute(builder: (_) => const MainNavigationShell()),
+                    );
+                  }
                 },
                 child: const Text('Start Shopping'),
               ),

@@ -26,8 +26,8 @@ class CartItemModel {
   factory CartItemModel.fromMap(Map<String, dynamic> map, String id) {
     return CartItemModel(
       productId: map['productId'] as String? ?? id,
-      productName: map['productName'] as String? ?? '',
-      quantity: (map['quantity'] as num?)?.toInt() ?? 1,
+      productName: map['productName'] as String? ?? map['title'] as String? ?? map['name'] as String? ?? 'Grocery Item',
+      quantity: (map['quantity'] as num?)?.toInt() ?? (map['qty'] as num?)?.toInt() ?? 1,
       unitPrice: (map['unitPrice'] as num?)?.toDouble() ?? 0.0,
       imageUrl: map['imageUrl'] as String? ?? '',
       quantityLabel: map['quantityLabel'] as String? ?? '',

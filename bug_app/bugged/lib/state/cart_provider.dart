@@ -52,8 +52,7 @@ class CartProvider extends ChangeNotifier {
   void decrementItem(String productId) {
     if (!_items.containsKey(productId)) return;
 
-    if (injectBugs) {
-      // Logic Bug: Allows negative quantities
+    if (_items[productId]!.quantity > 1) {
       _items.update(
         productId,
         (existing) => CartItem(
@@ -62,17 +61,7 @@ class CartProvider extends ChangeNotifier {
         ),
       );
     } else {
-      if (_items[productId]!.quantity > 1) {
-        _items.update(
-          productId,
-          (existing) => CartItem(
-            product: existing.product,
-            quantity: existing.quantity - 1,
-          ),
-        );
-      } else {
-        _items.remove(productId);
-      }
+      _items.remove(productId);
     }
     notifyListeners();
   }

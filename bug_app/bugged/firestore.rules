@@ -10,16 +10,16 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
-    // Categories: Public read, no mobile write
+    // Categories: Authenticated read; authenticated write for initial seeding
     match /categories/{categoryId} {
       allow read: if isAuthenticated();
-      allow write: if false;
+      allow write: if isAuthenticated();
     }
 
-    // Products: Public read, no mobile write
+    // Products: Authenticated read; authenticated write for initial seeding
     match /products/{productId} {
       allow read: if isAuthenticated();
-      allow write: if false;
+      allow write: if isAuthenticated();
     }
 
     // Users: Owner read and write only

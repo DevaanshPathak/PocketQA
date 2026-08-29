@@ -30,7 +30,10 @@ class QuickCartApp extends StatelessWidget {
     return MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (_) => AuthProvider()),
-        ChangeNotifierProvider(create: (_) => ProductProvider()),
+        ChangeNotifierProxyProvider<AuthProvider, ProductProvider>(
+          create: (_) => ProductProvider(),
+          update: (_, auth, product) => product!..updateUserId(auth.uid),
+        ),
         ChangeNotifierProxyProvider<AuthProvider, CartProvider>(
           create: (_) => CartProvider(),
           update: (_, auth, cart) => cart!..updateUserId(auth.uid),
@@ -46,6 +49,14 @@ class QuickCartApp extends StatelessWidget {
         theme: QuickCartTheme.lightTheme,
         home: Consumer<AuthProvider>(
           builder: (context, auth, _) {
+            if (auth.isLoading) {
+              return const Scaffold(
+                backgroundColor: QuickCartTheme.surfaceWhite,
+                body: Center(
+                  child: CircularProgressIndicator(color: QuickCartTheme.primaryGreen),
+                ),
+              );
+            }
             if (auth.isAuthenticated) {
               return const MainNavigationShell();
             }

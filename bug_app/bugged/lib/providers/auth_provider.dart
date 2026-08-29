@@ -18,6 +18,20 @@ class AuthProvider extends ChangeNotifier {
   StreamSubscription<UserModel?>? _userSubscription;
 
   AuthProvider() {
+    _firebaseUser = _authRepository.currentUser;
+    if (_firebaseUser != null) {
+      _userModel = UserModel(
+        uid: _firebaseUser!.uid,
+        displayName: _firebaseUser!.displayName ?? (_firebaseUser!.email?.isNotEmpty == true ? _firebaseUser!.email!.split('@').first : 'User'),
+        email: _firebaseUser!.email ?? '',
+        phone: _firebaseUser!.phoneNumber ?? '',
+        photoUrl: _firebaseUser!.photoURL ?? '',
+        createdAt: DateTime.now(),
+        updatedAt: DateTime.now(),
+      );
+    } else {
+      _isLoading = false;
+    }
     _initAuthStream();
   }
 
@@ -35,7 +49,21 @@ class AuthProvider extends ChangeNotifier {
       _userSubscription?.cancel();
       if (user != null) {
         _userSubscription = _userRepository.streamProfile(user.uid).listen((profile) {
-          _userModel = profile;
+          if (profile != null) {
+            _userModel = profile;
+          } else {
+            final defaultUser = UserModel(
+              uid: user.uid,
+              displayName: user.displayName ?? (user.email?.isNotEmpty == true ? user.email!.split('@').first : 'User'),
+              email: user.email ?? '',
+              phone: user.phoneNumber ?? '',
+              photoUrl: user.photoURL ?? '',
+              createdAt: DateTime.now(),
+              updatedAt: DateTime.now(),
+            );
+            _userModel = defaultUser;
+            _userRepository.updateProfile(user.uid, defaultUser.toMap());
+          }
           _isLoading = false;
           notifyListeners();
         });
@@ -86,6 +114,65 @@ class AuthProvider extends ChangeNotifier {
     required String name,
   }) =>
       signUp(name, email, password);
+
+  Future<bool> updateProfile({
+    String? displayName,
+    String? email,
+    String? phone,
+    String? photoUrl,
+    bool clearPhoto = false,
+  }) async {
+    final currentUid = uid;
+    final data = <String, dynamic>{};
+    if (displayName != null) data['displayName'] = displayName;
+    if (email != null) data['email'] = email;
+    if (phone != null) data['phone'] = phone;
+    // Always persist photoUrl changes — including removal (empty string = no photo).
+    if (clearPhoto) {
+      data['photoUrl'] = '';
+    } else if (photoUrl != null) {
+      data['photoUrl'] = photoUrl;
+    }
+
+    if (currentUid.isNotEmpty) {
+      try {
+        await _userRepository.updateProfile(currentUid, data);
+      } catch (e) {
+        debugPrint('Firestore profile update error: $e');
+      }
+      // Update Firebase Auth email if changed.
+      // verifyBeforeUpdateEmail sends a verification link; the email updates
+      // in Firebase Auth only after the user clicks it.
+      if (email != null && _firebaseUser != null && email != _firebaseUser!.email) {
+        try {
+          await _firebaseUser!.verifyBeforeUpdateEmail(email);
+          debugPrint('Verification email sent to $email. Auth email updates after confirmation.');
+        } catch (e) {
+          debugPrint('Firebase Auth email update error: $e');
+        }
+      }
+    }
+
+    _userModel = (_userModel ??
+            UserModel(
+              uid: currentUid.isNotEmpty ? currentUid : 'user_1',
+              displayName: displayName ?? '',
+              email: email ?? '',
+              phone: phone ?? '',
+              photoUrl: clearPhoto ? '' : (photoUrl ?? ''),
+              createdAt: DateTime.now(),
+              updatedAt: DateTime.now(),
+            ))
+        .copyWith(
+      displayName: displayName,
+      email: email,
+      phone: phone,
+      // Pass null explicitly when clearing, otherwise pass the new URL.
+      photoUrl: clearPhoto ? null : photoUrl,
+    );
+    notifyListeners();
+    return true;
+  }
 
   Future<bool> signInAnonymously() async {
     _setLoading(true);

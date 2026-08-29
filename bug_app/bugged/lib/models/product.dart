@@ -13,6 +13,12 @@ class Product {
     required this.imageUrl,
   });
 
+  String get name => title;
+  String get brand => 'QuickCart';
+  String get quantityLabel => '1 unit';
+  double get originalPrice => price;
+  int get discountPercentage => 0;
+
   factory Product.fromMap(Map<String, dynamic> data, String documentId) {
     return Product(
       id: documentId,

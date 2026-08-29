@@ -51,7 +51,7 @@ class SettingsScreen extends StatelessWidget {
           ListTile(
             leading: const Icon(Icons.info_outline, color: QuickCartTheme.primaryGreen),
             title: const Text('About QuickCart'),
-            subtitle: const Text('Version 1.0.0 (PocketQA Buggy Fixture Build)'),
+            subtitle: const Text('Version 1.0.0'),
           ),
         ],
       ),

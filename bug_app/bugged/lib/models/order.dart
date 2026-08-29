@@ -42,6 +42,8 @@ class OrderModel {
     required this.timestamp,
   });
 
+  double get totalAmount => total;
+
   Map<String, dynamic> toMap() {
     return {
       'userId': userId,

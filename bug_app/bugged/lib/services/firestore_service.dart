@@ -29,7 +29,14 @@ class FirestoreService {
 
   Future<void> updateUserProfile(String uid, Map<String, dynamic> data) async {
     data['updatedAt'] = FieldValue.serverTimestamp();
-    await _db.collection('users').doc(uid).update(data);
+    await _db.collection('users').doc(uid).set(data, SetOptions(merge: true));
+  }
+
+  /// Returns the raw Firestore document data for a user (including any extra
+  /// fields like deliveryPreferences that are not modelled in [UserModel]).
+  Future<Map<String, dynamic>?> getRawUserDocument(String uid) async {
+    final doc = await _db.collection('users').doc(uid).get();
+    return doc.exists ? doc.data() : null;
   }
 
   // --- CATEGORIES ---

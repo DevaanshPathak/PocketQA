@@ -21,8 +21,8 @@ void main() async {
   runApp(
     QuickCommerceApp(
       config: const AppConfig(
-        injectBugs: true,
-        appTitle: "PocketQA Testbed (Buggy)",
+        injectBugs: false,
+        appTitle: "QuickCart",
         child: SizedBox.shrink(), // Dummy child for initial creation
       ),
     ),

@@ -19,9 +19,10 @@ class CategoryModel {
     this.iconName = 'category',
     this.sortOrder = 0,
     this.isActive = true,
-    required this.createdAt,
-    required this.updatedAt,
-  });
+    DateTime? createdAt,
+    DateTime? updatedAt,
+  })  : createdAt = createdAt ?? DateTime.now(),
+        updatedAt = updatedAt ?? DateTime.now();
 
   factory CategoryModel.fromMap(Map<String, dynamic> map, String id) {
     return CategoryModel(

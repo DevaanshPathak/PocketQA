@@ -5,7 +5,6 @@ import '../../theme.dart';
 import '../../widgets/product_card.dart';
 import '../search/search_screen.dart';
 import '../product/product_details_screen.dart';
-import '../experimental/low_semantics_screen.dart';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
@@ -75,13 +74,12 @@ class HomeScreen extends StatelessWidget {
                       ),
                       IconButton(
                         onPressed: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(builder: (_) => const LowSemanticsScreen()),
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('No new notifications')),
                           );
                         },
-                        tooltip: 'VLM Fresh Picks',
-                        icon: const Icon(Icons.remove_red_eye_outlined, color: QuickCartTheme.primaryDarkGreen),
+                        tooltip: 'Notifications',
+                        icon: const Icon(Icons.notifications_none_outlined, color: QuickCartTheme.primaryDarkGreen),
                       ),
                     ],
                   ),
@@ -171,10 +169,68 @@ class HomeScreen extends StatelessWidget {
                 ),
               ),
 
+              // Fresh Picks Section (Featured Products)
+              if (products.isNotEmpty) ...[
+                const SliverToBoxAdapter(
+                  child: Padding(
+                    padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          'Fresh Picks 🍎',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            color: QuickCartTheme.textPrimary,
+                          ),
+                        ),
+                        Text(
+                          'Featured',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: QuickCartTheme.primaryGreen,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                SliverToBoxAdapter(
+                  child: SizedBox(
+                    height: 220,
+                    child: ListView.builder(
+                      scrollDirection: Axis.horizontal,
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      itemCount: products.length > 5 ? 5 : products.length,
+                      itemBuilder: (context, index) {
+                        final prod = products[index];
+                        return Container(
+                          width: 150,
+                          margin: const EdgeInsets.symmetric(horizontal: 4),
+                          child: ProductCard(
+                            product: prod,
+                            onTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => ProductDetailsScreen(product: prod),
+                                ),
+                              );
+                            },
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ),
+              ],
+
               // Categories Header
               const SliverToBoxAdapter(
                 child: Padding(
-                  padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
+                  padding: EdgeInsets.fromLTRB(16, 20, 16, 8),
                   child: Text(
                     'Shop by Category',
                     style: TextStyle(
@@ -237,12 +293,12 @@ class HomeScreen extends StatelessWidget {
                 ),
               ),
 
-              // Popular Products Header
+              // Popular Near You Header
               const SliverToBoxAdapter(
                 child: Padding(
                   padding: EdgeInsets.fromLTRB(16, 20, 16, 12),
                   child: Text(
-                    'Popular Near You',
+                    'Popular Near You 🔥',
                     style: TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
@@ -262,7 +318,10 @@ class HomeScreen extends StatelessWidget {
                   child: Padding(
                     padding: EdgeInsets.all(32),
                     child: Center(
-                      child: Text('No products available in this category'),
+                      child: Text(
+                        'No products available in this category',
+                        style: TextStyle(color: QuickCartTheme.textSecondary),
+                      ),
                     ),
                   ),
                 )

@@ -17,35 +17,14 @@ class LowSemanticsScreen extends StatelessWidget {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Fresh Picks (VLM Test Screen)'),
+        title: const Text('Fresh Picks'),
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Container(
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: Colors.purple.shade50,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.purple.shade200),
-              ),
-              child: const Row(
-                children: [
-                  Icon(Icons.remove_red_eye, color: Colors.purple),
-                  SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      'PocketQA VLM Test Target: This screen looks completely normal to humans, but intentionally strips accessibility semantics to test visual perception fallback.',
-                      style: TextStyle(fontSize: 12, color: Colors.purple, fontWeight: FontWeight.w600),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-
-            const SizedBox(height: 20),
+            const SizedBox(height: 8),
 
             // EXCLUDE SEMANTICS BLOCK: Intentionally hides accessibility nodes from standard inspection tree
             ExcludeSemantics(
@@ -112,7 +91,7 @@ class LowSemanticsScreen extends StatelessWidget {
                                     ),
                                     onPressed: () {
                                       ScaffoldMessenger.of(context).showSnackBar(
-                                        SnackBar(content: Text('Added ${item['name']} via VLM visual click')),
+                                        SnackBar(content: Text('Added ${item['name']} to cart')),
                                       );
                                     },
                                     child: const Text('ADD', style: TextStyle(fontSize: 12)),

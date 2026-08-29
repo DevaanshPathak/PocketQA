@@ -18,6 +18,11 @@ class _SearchScreenState extends State<SearchScreen> {
   @override
   void dispose() {
     _searchController.dispose();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        context.read<ProductProvider>().setSearchQuery('');
+      }
+    });
     super.dispose();
   }
 

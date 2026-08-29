@@ -32,9 +32,10 @@ class ProductModel {
     this.isAvailable = true,
     this.stockQuantity = 100,
     this.sortOrder = 0,
-    required this.createdAt,
-    required this.updatedAt,
-  });
+    DateTime? createdAt,
+    DateTime? updatedAt,
+  }) : createdAt = createdAt ?? DateTime.now(),
+       updatedAt = updatedAt ?? DateTime.now();
 
   CartItemModel toCartItem({int quantity = 1}) {
     return CartItemModel(
@@ -87,17 +88,17 @@ class ProductModel {
   factory ProductModel.fromMap(Map<String, dynamic> map, String id) {
     return ProductModel(
       id: id,
-      name: map['name'] as String? ?? '',
+      name: map['name'] as String? ?? map['title'] as String? ?? 'Grocery Product',
       description: map['description'] as String? ?? '',
       categoryId: map['categoryId'] as String? ?? '',
-      brand: map['brand'] as String? ?? '',
+      brand: map['brand'] as String? ?? 'QuickCart',
       quantityLabel: map['quantityLabel'] as String? ?? '1 unit',
       price: (map['price'] as num?)?.toDouble() ?? 0.0,
-      originalPrice: (map['originalPrice'] as num?)?.toDouble() ?? 0.0,
+      originalPrice: (map['originalPrice'] as num?)?.toDouble() ?? (map['price'] as num?)?.toDouble() ?? 0.0,
       discountPercentage: (map['discountPercentage'] as num?)?.toInt() ?? 0,
       imageUrl: map['imageUrl'] as String? ?? '',
       isAvailable: map['isAvailable'] as bool? ?? true,
-      stockQuantity: (map['stockQuantity'] as num?)?.toInt() ?? 0,
+      stockQuantity: (map['stockQuantity'] as num?)?.toInt() ?? (map['stock'] as num?)?.toInt() ?? 100,
       sortOrder: (map['sortOrder'] as num?)?.toInt() ?? 0,
       createdAt: (map['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
       updatedAt: (map['updatedAt'] as Timestamp?)?.toDate() ?? DateTime.now(),

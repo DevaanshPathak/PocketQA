@@ -21,20 +21,8 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   final FirebaseService _firebaseService = FirebaseService();
 
   Future<void> _placeOrder(bool injectBugs) async {
-    if (!injectBugs) {
-      if (!_formKey.currentState!.validate()) return;
-      setState(() => _isLoading = true);
-    } else {
-      // Silent Failure Bug: No validation, just clear and return
-      if (_nameController.text.isEmpty || _addressController.text.isEmpty) {
-        _nameController.clear();
-        _addressController.clear();
-        _phoneController.clear();
-        FocusScope.of(context).unfocus();
-        return;
-      }
-      // Race condition simulation: don't set _isLoading = true
-    }
+    if (!_formKey.currentState!.validate()) return;
+    setState(() => _isLoading = true);
 
     final cart = Provider.of<CartProvider>(context, listen: false);
     final order = OrderModel(
@@ -57,13 +45,13 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
         Navigator.of(context).pushReplacementNamed('/order-success');
       }
     } catch (e) {
-      if (mounted && !injectBugs) {
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error placing order: $e')),
         );
       }
     } finally {
-      if (mounted && !injectBugs) {
+      if (mounted) {
         setState(() => _isLoading = false);
       }
     }

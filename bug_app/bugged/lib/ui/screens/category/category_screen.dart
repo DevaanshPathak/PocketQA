@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../../providers/product_provider.dart';
-import '../../../config/bug_fixtures.dart';
+import '../../../models/product_model.dart';
 import '../../theme.dart';
 import '../../widgets/product_card.dart';
 import '../product/product_details_screen.dart';
+
 
 class CategoryScreen extends StatelessWidget {
   const CategoryScreen({super.key});
@@ -16,20 +17,18 @@ class CategoryScreen extends StatelessWidget {
     final products = productProvider.filteredProducts;
 
     // Generate extended list of products to guarantee 20+ items for scrolling & PocketQA boundary testing
-    final extendedProducts = List.generate(
-      24,
-      (index) {
-        if (products.isNotEmpty) {
-          final base = products[index % products.length];
-          return base.copyWith(
-            id: '${base.id}_ext_$index',
-            name: '${base.name} (Pack ${index + 1})',
+    final List<ProductModel> extendedProducts = products.isEmpty
+        ? []
+        : List.generate(
+            24,
+            (index) {
+              final base = products[index % products.length];
+              return base.copyWith(
+                id: '${base.id}_ext_$index',
+                name: '${base.name} (Pack ${index + 1})',
+              );
+            },
           );
-        } else {
-          return null;
-        }
-      },
-    ).whereType<dynamic>().toList();
 
     return Scaffold(
       appBar: AppBar(
@@ -80,41 +79,42 @@ class CategoryScreen extends StatelessWidget {
 
           const Divider(height: 1),
 
-          // Scrollable Grid (20+ Items)
+          // Scrollable Grid
           Expanded(
-            child: extendedProducts.isEmpty
+            child: productProvider.isLoading
                 ? const Center(child: CircularProgressIndicator())
-                : GridView.builder(
-                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 80),
-                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: 2,
-                      childAspectRatio: 0.68,
-                      crossAxisSpacing: 12,
-                      mainAxisSpacing: 12,
-                    ),
-                    itemCount: extendedProducts.length,
-                    itemBuilder: (context, index) {
-                      final prod = extendedProducts[index];
+                : extendedProducts.isEmpty
+                    ? const Center(
+                        child: Text(
+                          'No products available in this category',
+                          style: TextStyle(color: QuickCartTheme.textSecondary),
+                        ),
+                      )
+                    : GridView.builder(
+                        padding: const EdgeInsets.fromLTRB(16, 16, 16, 80),
+                        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: 2,
+                          childAspectRatio: 0.68,
+                          crossAxisSpacing: 12,
+                          mainAxisSpacing: 12,
+                        ),
+                        itemCount: extendedProducts.length,
+                        itemBuilder: (context, index) {
+                          final prod = extendedProducts[index];
 
-                      return ProductCard(
-                        product: prod,
-                        onTap: () {
-                          // BUG 3: List Index Out of Bounds Trigger
-                          // Interacting near list boundary (index >= totalItems - 2) triggers a RangeError
-                          if (index >= extendedProducts.length - 2) {
-                            BugFixtures.triggerBug3IndexOverflow(index, extendedProducts.length);
-                          }
-
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => ProductDetailsScreen(product: prod),
-                            ),
+                          return ProductCard(
+                            product: prod,
+                            onTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => ProductDetailsScreen(product: prod),
+                                ),
+                              );
+                            },
                           );
                         },
-                      );
-                    },
-                  ),
+                      ),
           ),
         ],
       ),

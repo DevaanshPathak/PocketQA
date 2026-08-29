@@ -32,19 +32,30 @@ class CartProvider extends ChangeNotifier {
         _items = cartItems;
         notifyListeners();
       });
-    } else {
-      _items = [];
-      notifyListeners();
     }
   }
 
   Future<void> addToCart(ProductModel product, {int quantity = 1}) async {
-    if (_userId == null) return;
-    await _cartRepository.addToCart(
-      uid: _userId!,
-      product: product,
-      quantity: quantity,
-    );
+    final existingIndex = _items.indexWhere((i) => i.productId == product.id);
+    if (existingIndex != -1) {
+      final existing = _items[existingIndex];
+      _items[existingIndex] = existing.copyWith(quantity: existing.quantity + quantity);
+    } else {
+      _items.add(product.toCartItem(quantity: quantity));
+    }
+    notifyListeners();
+
+    if (_userId != null && _userId!.isNotEmpty) {
+      try {
+        await _cartRepository.addToCart(
+          uid: _userId!,
+          product: product,
+          quantity: quantity,
+        );
+      } catch (e) {
+        debugPrint('Firestore cart sync fallback: $e');
+      }
+    }
   }
 
   Future<void> addItem(ProductModel product) async {
@@ -71,25 +82,56 @@ class CartProvider extends ChangeNotifier {
   }
 
   Future<void> updateQuantity(String productId, int newQuantity) async {
-    if (_userId == null) return;
-    await _cartRepository.updateQuantity(
-      uid: _userId!,
-      productId: productId,
-      quantity: newQuantity,
-    );
+    final existingIndex = _items.indexWhere((i) => i.productId == productId);
+    if (existingIndex != -1) {
+      if (newQuantity <= 0) {
+        _items.removeAt(existingIndex);
+      } else {
+        _items[existingIndex] = _items[existingIndex].copyWith(quantity: newQuantity);
+      }
+      notifyListeners();
+    }
+
+    if (_userId != null && _userId!.isNotEmpty) {
+      try {
+        await _cartRepository.updateQuantity(
+          uid: _userId!,
+          productId: productId,
+          quantity: newQuantity,
+        );
+      } catch (e) {
+        debugPrint('Firestore cart sync fallback: $e');
+      }
+    }
   }
 
   Future<void> removeFromCart(String productId) async {
-    if (_userId == null) return;
-    await _cartRepository.removeFromCart(
-      uid: _userId!,
-      productId: productId,
-    );
+    _items.removeWhere((i) => i.productId == productId);
+    notifyListeners();
+
+    if (_userId != null && _userId!.isNotEmpty) {
+      try {
+        await _cartRepository.removeFromCart(
+          uid: _userId!,
+          productId: productId,
+        );
+      } catch (e) {
+        debugPrint('Firestore cart sync fallback: $e');
+      }
+    }
   }
 
   Future<void> clearCart() async {
-    if (_userId == null) return;
-    await _cartRepository.clearCart(_userId!);
+    _items.clear();
+    notifyListeners();
+
+    if (_userId != null && _userId!.isNotEmpty) {
+      try {
+        await _cartRepository.clearCart(_userId!);
+      } catch (e) {
+        debugPrint('Firestore cart sync fallback: $e');
+      }
+    }
   }
 
   @override

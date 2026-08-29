@@ -17,11 +17,12 @@ class UserModel {
     required this.email,
     this.phone = '',
     this.photoUrl = '',
-    required this.createdAt,
-    required this.updatedAt,
+    DateTime? createdAt,
+    DateTime? updatedAt,
     this.defaultAddressId,
     this.isActive = true,
-  });
+  })  : createdAt = createdAt ?? DateTime.now(),
+        updatedAt = updatedAt ?? DateTime.now();
 
   String get phoneNumber => phone;
 
@@ -57,7 +58,7 @@ class UserModel {
     String? displayName,
     String? email,
     String? phone,
-    String? photoUrl,
+    Object? photoUrl = _sentinel,
     String? defaultAddressId,
     bool? isActive,
   }) {
@@ -66,7 +67,7 @@ class UserModel {
       displayName: displayName ?? this.displayName,
       email: email ?? this.email,
       phone: phone ?? this.phone,
-      photoUrl: photoUrl ?? this.photoUrl,
+      photoUrl: photoUrl == _sentinel ? this.photoUrl : (photoUrl as String? ?? ''),
       createdAt: createdAt,
       updatedAt: DateTime.now(),
       defaultAddressId: defaultAddressId ?? this.defaultAddressId,
@@ -74,3 +75,6 @@ class UserModel {
     );
   }
 }
+
+// Sentinel object used to distinguish "not provided" from explicit null in copyWith.
+const Object _sentinel = Object();

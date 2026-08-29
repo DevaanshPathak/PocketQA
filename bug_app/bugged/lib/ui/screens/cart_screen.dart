@@ -16,18 +16,13 @@ class _CartScreenState extends State<CartScreen> {
 
   void _applyPromo(bool injectBugs) {
     final code = _promoController.text.trim();
-    if (injectBugs && (code == "FREEZE" || code == "FAIL")) {
-      // ANR / UI Freeze Bug
-      while (true) {
-        // Infinite loop on main isolate
-      }
-    } else if (code == "FAIL") {
-       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Invalid promo code')),
+    if (code.toUpperCase() == "SAVE10" || code.toUpperCase() == "FREEZE") {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Promo code applied!')),
       );
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Promo code applied!')),
+        const SnackBar(content: Text('Invalid promo code')),
       );
     }
   }

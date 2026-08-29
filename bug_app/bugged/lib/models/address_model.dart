@@ -25,9 +25,10 @@ class AddressModel {
     this.latitude = 0.0,
     this.longitude = 0.0,
     this.isDefault = false,
-    required this.createdAt,
-    required this.updatedAt,
-  });
+    DateTime? createdAt,
+    DateTime? updatedAt,
+  })  : createdAt = createdAt ?? DateTime.now(),
+        updatedAt = updatedAt ?? DateTime.now();
 
   factory AddressModel.fromMap(Map<String, dynamic> map, String id) {
     return AddressModel(

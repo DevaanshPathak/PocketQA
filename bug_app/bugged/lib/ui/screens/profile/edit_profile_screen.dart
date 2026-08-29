@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../../providers/auth_provider.dart';
-import '../../../config/bug_fixtures.dart';
 import '../../theme.dart';
 
 class EditProfileScreen extends StatefulWidget {
@@ -16,9 +15,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   late TextEditingController _emailController;
   late TextEditingController _phoneController;
 
-  // Bug 1 state variables: Nullable profile photo state
-  String? _selectedPhotoPath = 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=300';
-  bool _photoSelectionCancelled = false;
+  String? _selectedPhotoPath;
 
   @override
   void initState() {
@@ -27,6 +24,9 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     _nameController = TextEditingController(text: user?.displayName.isNotEmpty == true ? user!.displayName : 'Sagar Mehta');
     _emailController = TextEditingController(text: user?.email.isNotEmpty == true ? user!.email : 'sagar@example.com');
     _phoneController = TextEditingController(text: user?.phoneNumber.isNotEmpty == true ? user!.phoneNumber : '+91 9876543210');
+    // Initialize from stored photoUrl; null means no photo.
+    final storedPhoto = user?.photoUrl ?? '';
+    _selectedPhotoPath = storedPhoto.isNotEmpty ? storedPhoto : null;
   }
 
   @override
@@ -58,18 +58,18 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
               ListTile(
                 leading: const Icon(Icons.photo_library, color: QuickCartTheme.primaryGreen),
                 title: const Text('Choose from Gallery'),
-                onTap: () => Navigator.pop(context, 'gallery_photo.jpg'),
+                onTap: () => Navigator.pop(context, 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=300'),
               ),
               ListTile(
                 leading: const Icon(Icons.camera_alt, color: QuickCartTheme.primaryGreen),
                 title: const Text('Take a Photo'),
-                onTap: () => Navigator.pop(context, 'camera_photo.jpg'),
+                onTap: () => Navigator.pop(context, 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=300'),
               ),
               const Divider(),
               ListTile(
                 leading: const Icon(Icons.cancel, color: Colors.red),
                 title: const Text('Cancel Selection'),
-                onTap: () => Navigator.pop(context, null), // Returns null on Cancel
+                onTap: () => Navigator.pop(context, null),
               ),
             ],
           ),
@@ -77,40 +77,37 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       },
     );
 
-    if (result == null) {
-      // User tapped Cancel in mock photo picker
-      setState(() {
-        _selectedPhotoPath = null; // Photo selection leaves state null
-        _photoSelectionCancelled = true;
-        BugFixtures.photoCancelled = true;
-        BugFixtures.photoUrlState = null;
-      });
-    } else {
+    if (result != null) {
       setState(() {
         _selectedPhotoPath = result;
-        _photoSelectionCancelled = false;
-        BugFixtures.photoCancelled = false;
       });
     }
   }
 
-  void _saveChanges() {
-    // BUG 1: Null-Safety Crash Trigger
-    // When photo selection was cancelled, _selectedPhotoPath is null.
-    // Explicitly dereferencing _selectedPhotoPath! without null check throws Null Check Operator Exception
-    if (_photoSelectionCancelled || _selectedPhotoPath == null) {
-      // Trigger deterministic Null Safety Exception for PocketQA
-      BugFixtures.triggerBug1NullPhotoSave();
-      
-      // Stable line crash: Forced null check operator dereference
-      final String photoPath = _selectedPhotoPath!; 
-      debugPrint('Saved photo path: $photoPath');
-    }
+  void _saveChanges() async {
+    final auth = context.read<AuthProvider>();
+    final newName = _nameController.text.trim();
+    final newEmail = _emailController.text.trim();
+    final newPhone = _phoneController.text.trim();
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Profile updated successfully')),
+    // _selectedPhotoPath == null means the user explicitly removed their photo.
+    final bool photoWasCleared = _selectedPhotoPath == null &&
+        (auth.user?.photoUrl.isNotEmpty ?? false);
+
+    await auth.updateProfile(
+      displayName: newName,
+      email: newEmail,
+      phone: newPhone,
+      photoUrl: _selectedPhotoPath,
+      clearPhoto: photoWasCleared,
     );
-    Navigator.pop(context);
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Profile updated successfully')),
+      );
+      Navigator.pop(context);
+    }
   }
 
   @override
@@ -149,9 +146,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                           onPressed: () {
                             setState(() {
                               _selectedPhotoPath = null;
-                              _photoSelectionCancelled = true;
-                              BugFixtures.photoCancelled = true;
-                              BugFixtures.photoUrlState = null;
                             });
                           },
                           icon: const Icon(Icons.delete_outline, size: 18, color: Colors.red),

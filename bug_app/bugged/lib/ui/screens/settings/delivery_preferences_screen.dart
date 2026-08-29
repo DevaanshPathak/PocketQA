@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../../../providers/auth_provider.dart';
+import '../../../services/firestore_service.dart';
 import '../../theme.dart';
 
 class DeliveryPreferencesScreen extends StatefulWidget {
@@ -8,52 +11,82 @@ class DeliveryPreferencesScreen extends StatefulWidget {
   State<DeliveryPreferencesScreen> createState() => _DeliveryPreferencesScreenState();
 }
 
-class _DeliveryPreferencesScreenState extends State<DeliveryPreferencesScreen> with WidgetsBindingObserver {
+class _DeliveryPreferencesScreenState extends State<DeliveryPreferencesScreen>
+    with WidgetsBindingObserver {
   String _selectedSlot = 'Morning (8 AM - 11 AM)';
   bool _leaveAtDoor = true;
   bool _contactless = false;
+  bool _isSaving = false;
+  bool _isLoading = true;
   final TextEditingController _instructionsController = TextEditingController();
 
-  // Bug 2 state tracker: Stateful controller invalidated during lifecycle state changes
-  bool _isLifecycleInvalidated = false;
-  late _DisposedStateController _stateController;
+  final FirestoreService _firestoreService = FirestoreService();
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addObserver(this);
-    _stateController = _DisposedStateController();
-  }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    super.didChangeAppLifecycleState(state);
-    // When app is backgrounded/paused or returned, state becomes invalidated
-    if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive || state == AppLifecycleState.resumed) {
-      _isLifecycleInvalidated = true;
-      _stateController.dispose(); // State controller disposed on lifecycle transition
-    }
+    _loadPreferences();
   }
 
   @override
   void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
     _instructionsController.dispose();
     super.dispose();
   }
 
-  void _savePreferences() {
-    // BUG 2: Lifecycle / State Crash Trigger
-    // Accessing _stateController after app lifecycle state transition/disposal throws StateError
-    if (_isLifecycleInvalidated || _stateController.isDisposed) {
-      // Stable line crash: Accessing disposed state controller after lifecycle change
-      _stateController.updateState('SAVED');
+  /// Load persisted delivery preferences from Firestore.
+  Future<void> _loadPreferences() async {
+    final uid = context.read<AuthProvider>().uid;
+    if (uid.isEmpty) {
+      setState(() => _isLoading = false);
+      return;
     }
+    try {
+      final doc = await _firestoreService.getRawUserDocument(uid);
+      final prefs = doc?['deliveryPreferences'] as Map<String, dynamic>?;
+      if (prefs != null && mounted) {
+        setState(() {
+          _selectedSlot = prefs['timeSlot'] as String? ?? _selectedSlot;
+          _leaveAtDoor = prefs['leaveAtDoor'] as bool? ?? _leaveAtDoor;
+          _contactless = prefs['contactless'] as bool? ?? _contactless;
+          _instructionsController.text =
+              prefs['specialInstructions'] as String? ?? '';
+        });
+      }
+    } catch (e) {
+      debugPrint('Could not load delivery preferences: $e');
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Delivery preferences saved')),
-    );
-    Navigator.pop(context);
+  /// Save all delivery preferences to Firestore under the user document.
+  Future<void> _savePreferences() async {
+    final auth = context.read<AuthProvider>();
+    if (auth.uid.isEmpty) return;
+
+    setState(() => _isSaving = true);
+
+    try {
+      await _firestoreService.updateUserProfile(auth.uid, {
+        'deliveryPreferences': {
+          'timeSlot': _selectedSlot,
+          'leaveAtDoor': _leaveAtDoor,
+          'contactless': _contactless,
+          'specialInstructions': _instructionsController.text.trim(),
+        },
+      });
+    } catch (e) {
+      debugPrint('Failed to save delivery preferences: $e');
+    } finally {
+      if (mounted) {
+        setState(() => _isSaving = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Delivery preferences saved')),
+        );
+        Navigator.pop(context);
+      }
+    }
   }
 
   @override
@@ -62,134 +95,128 @@ class _DeliveryPreferencesScreenState extends State<DeliveryPreferencesScreen> w
       appBar: AppBar(
         title: const Text('Delivery Preferences'),
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Preferred Delivery Time Slot',
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-            ),
-            const SizedBox(height: 12),
-
-            Container(
-              decoration: BoxDecoration(
-                color: QuickCartTheme.surfaceWhite,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: QuickCartTheme.borderLight),
-              ),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : SingleChildScrollView(
+              padding: const EdgeInsets.all(20),
               child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  RadioListTile<String>(
-                    value: 'Morning (8 AM - 11 AM)',
-                    groupValue: _selectedSlot,
-                    activeColor: QuickCartTheme.primaryGreen,
-                    title: const Text('Morning (8 AM - 11 AM)'),
-                    onChanged: (val) {
-                      setState(() {
-                        _selectedSlot = val!;
-                        // Modifying preference state flags lifecycle state check
-                        _isLifecycleInvalidated = true;
-                        _stateController.dispose();
-                      });
-                    },
+                  const Text(
+                    'Preferred Delivery Time Slot',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
                   ),
-                  const Divider(height: 1),
-                  RadioListTile<String>(
-                    value: 'Afternoon (1 PM - 4 PM)',
-                    groupValue: _selectedSlot,
-                    activeColor: QuickCartTheme.primaryGreen,
-                    title: const Text('Afternoon (1 PM - 4 PM)'),
-                    onChanged: (val) {
-                      setState(() {
-                        _selectedSlot = val!;
-                        _isLifecycleInvalidated = true;
-                        _stateController.dispose();
-                      });
-                    },
+                  const SizedBox(height: 12),
+
+                  Container(
+                    decoration: BoxDecoration(
+                      color: QuickCartTheme.surfaceWhite,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: QuickCartTheme.borderLight),
+                    ),
+                    child: Column(
+                      children: [
+                        RadioListTile<String>(
+                          value: 'Morning (8 AM - 11 AM)',
+                          groupValue: _selectedSlot,
+                          activeColor: QuickCartTheme.primaryGreen,
+                          title: const Text('Morning (8 AM - 11 AM)'),
+                          onChanged: (val) {
+                            setState(() {
+                              _selectedSlot = val!;
+                            });
+                          },
+                        ),
+                        const Divider(height: 1),
+                        RadioListTile<String>(
+                          value: 'Afternoon (1 PM - 4 PM)',
+                          groupValue: _selectedSlot,
+                          activeColor: QuickCartTheme.primaryGreen,
+                          title: const Text('Afternoon (1 PM - 4 PM)'),
+                          onChanged: (val) {
+                            setState(() {
+                              _selectedSlot = val!;
+                            });
+                          },
+                        ),
+                        const Divider(height: 1),
+                        RadioListTile<String>(
+                          value: 'Evening (6 PM - 9 PM)',
+                          groupValue: _selectedSlot,
+                          activeColor: QuickCartTheme.primaryGreen,
+                          title: const Text('Evening (6 PM - 9 PM)'),
+                          onChanged: (val) {
+                            setState(() {
+                              _selectedSlot = val!;
+                            });
+                          },
+                        ),
+                      ],
+                    ),
                   ),
-                  const Divider(height: 1),
-                  RadioListTile<String>(
-                    value: 'Evening (6 PM - 9 PM)',
-                    groupValue: _selectedSlot,
+
+                  const SizedBox(height: 24),
+
+                  const Text(
+                    'Delivery Options',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                  ),
+                  const SizedBox(height: 12),
+
+                  SwitchListTile(
+                    value: _leaveAtDoor,
                     activeColor: QuickCartTheme.primaryGreen,
-                    title: const Text('Evening (6 PM - 9 PM)'),
-                    onChanged: (val) {
-                      setState(() {
-                        _selectedSlot = val!;
-                        _isLifecycleInvalidated = true;
-                        _stateController.dispose();
-                      });
-                    },
+                    title: const Text('Leave at Door / Security Gate'),
+                    subtitle: const Text('Rider will place items safely at gate'),
+                    onChanged: (val) => setState(() => _leaveAtDoor = val),
+                  ),
+
+                  SwitchListTile(
+                    value: _contactless,
+                    activeColor: QuickCartTheme.primaryGreen,
+                    title: const Text('Contactless Delivery'),
+                    subtitle: const Text('No physical contact or sign-off needed'),
+                    onChanged: (val) => setState(() => _contactless = val),
+                  ),
+
+                  const SizedBox(height: 24),
+
+                  const Text(
+                    'Special Delivery Instructions',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                  ),
+                  const SizedBox(height: 12),
+
+                  TextField(
+                    controller: _instructionsController,
+                    maxLines: 3,
+                    decoration: const InputDecoration(
+                      hintText:
+                          'e.g. Please do not ring doorbell, leave package near door',
+                    ),
+                  ),
+
+                  const SizedBox(height: 32),
+
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: _isSaving ? null : _savePreferences,
+                      child: _isSaving
+                          ? const SizedBox(
+                              height: 20,
+                              width: 20,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : const Text('Save Preferences'),
+                    ),
                   ),
                 ],
               ),
             ),
-
-            const SizedBox(height: 24),
-
-            const Text(
-              'Delivery Options',
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-            ),
-            const SizedBox(height: 12),
-
-            SwitchListTile(
-              value: _leaveAtDoor,
-              activeColor: QuickCartTheme.primaryGreen,
-              title: const Text('Leave at Door / Security Gate'),
-              subtitle: const Text('Rider will place items safely at gate'),
-              onChanged: (val) => setState(() => _leaveAtDoor = val),
-            ),
-
-            SwitchListTile(
-              value: _contactless,
-              activeColor: QuickCartTheme.primaryGreen,
-              title: const Text('Contactless Delivery'),
-              subtitle: const Text('No physical contact or sign-off needed'),
-              onChanged: (val) => setState(() => _contactless = val),
-            ),
-
-            const SizedBox(height: 24),
-
-            const Text(
-              'Special Delivery Instructions',
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-            ),
-            const SizedBox(height: 12),
-
-            TextField(
-              controller: _instructionsController,
-              maxLines: 3,
-              decoration: const InputDecoration(
-                hintText: 'e.g. Please do not ring doorbell, leave package near door',
-              ),
-            ),
-
-            const SizedBox(height: 32),
-
-            ElevatedButton(
-              onPressed: _savePreferences,
-              child: const Text('Save Preferences'),
-            ),
-          ],
-        ),
-      ),
     );
-  }
-}
-
-class _DisposedStateController {
-  bool isDisposed = false;
-
-  void dispose() {
-    isDisposed = true;
-  }
-
-  void updateState(String value) {
-    if (isDisposed) {
-      throw StateError('Cannot access disposed state controller after lifecycle state change.');
-    }
   }
 }

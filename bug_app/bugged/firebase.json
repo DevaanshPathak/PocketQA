@@ -1,1 +1,32 @@
-{"flutter":{"platforms":{"android":{"default":{"projectId":"pocketqa-test","appId":"1:790393020505:android:bca50ce31cd57cac0b9148","fileOutput":"android/app/google-services.json"}},"dart":{"lib/firebase_options.dart":{"projectId":"pocketqa-test","configurations":{"android":"1:790393020505:android:bca50ce31cd57cac0b9148","ios":"1:790393020505:ios:1039c368c42c23160b9148","macos":"1:790393020505:ios:1039c368c42c23160b9148","web":"1:790393020505:web:db14a1bc22f0c16f0b9148","windows":"1:790393020505:web:f891545f3a715ac20b9148"}}}}}}
+{
+  "firestore": {
+    "rules": "firestore.rules",
+    "indexes": "firestore.indexes.json"
+  },
+  "storage": {
+    "rules": "storage.rules"
+  },
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "pocketqa-test",
+          "appId": "1:790393020505:android:bca50ce31cd57cac0b9148",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "pocketqa-test",
+          "configurations": {
+            "android": "1:790393020505:android:bca50ce31cd57cac0b9148",
+            "ios": "1:790393020505:ios:1039c368c42c23160b9148",
+            "macos": "1:790393020505:ios:1039c368c42c23160b9148",
+            "web": "1:790393020505:web:db14a1bc22f0c16f0b9148",
+            "windows": "1:790393020505:web:f891545f3a715ac20b9148"
+          }
+        }
+      }
+    }
+  }
+}

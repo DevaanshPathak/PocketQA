@@ -19,7 +19,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   Widget build(BuildContext context) {
     final cart = context.watch<CartProvider>();
     final orderProvider = context.watch<OrderProvider>();
-    final totalPayable = cart.totalAmount + 30;
+    final totalPayable = cart.totalAmount;
 
     return Scaffold(
       appBar: AppBar(

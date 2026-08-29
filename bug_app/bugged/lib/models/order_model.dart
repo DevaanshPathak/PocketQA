@@ -22,8 +22,8 @@ class OrderItemSnapshot {
   factory OrderItemSnapshot.fromMap(Map<String, dynamic> map) {
     return OrderItemSnapshot(
       productId: map['productId'] as String? ?? '',
-      name: map['name'] as String? ?? '',
-      quantity: (map['quantity'] as num?)?.toInt() ?? 1,
+      name: map['name'] as String? ?? map['title'] as String? ?? map['productName'] as String? ?? 'Item',
+      quantity: (map['quantity'] as num?)?.toInt() ?? (map['qty'] as num?)?.toInt() ?? 1,
       unitPrice: (map['unitPrice'] as num?)?.toDouble() ?? 0.0,
       quantityLabel: map['quantityLabel'] as String? ?? '',
       imageUrl: map['imageUrl'] as String? ?? '',
@@ -67,9 +67,10 @@ class OrderModel {
     required this.deliveryAddress,
     this.paymentMethod = 'UPI',
     this.estimatedDelivery = '15-20 minutes',
-    required this.createdAt,
-    required this.updatedAt,
-  });
+    DateTime? createdAt,
+    DateTime? updatedAt,
+  })  : createdAt = createdAt ?? DateTime.now(),
+        updatedAt = updatedAt ?? DateTime.now();
 
   double get totalAmount => total;
 
@@ -82,9 +83,9 @@ class OrderModel {
       items: rawItems
           .map((itemMap) => OrderItemSnapshot.fromMap(itemMap as Map<String, dynamic>))
           .toList(),
-      subtotal: (map['subtotal'] as num?)?.toDouble() ?? 0.0,
+      subtotal: (map['subtotal'] as num?)?.toDouble() ?? (map['total'] as num?)?.toDouble() ?? 0.0,
       deliveryFee: (map['deliveryFee'] as num?)?.toDouble() ?? 2.99,
-      total: (map['total'] as num?)?.toDouble() ?? 0.0,
+      total: (map['total'] as num?)?.toDouble() ?? (map['totalAmount'] as num?)?.toDouble() ?? 0.0,
       deliveryAddress: map['deliveryAddress'] as String? ?? '',
       paymentMethod: map['paymentMethod'] as String? ?? 'UPI',
       estimatedDelivery: map['estimatedDelivery'] as String? ?? '15-20 minutes',
