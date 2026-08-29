@@ -46,4 +46,15 @@ class GemmaActionPlannerTest {
         assertEquals("Cart quantity can be negative", assessment.issueTitle)
         assertEquals("The displayed quantity is -1", assessment.issueEvidence)
     }
+
+    @Test
+    fun `planner charter requires boundary exploration before completion`() {
+        val prompt = GemmaActionPlanner.prompt(
+            screenSummary = "Cart quantity 0",
+            candidates = listOf("Increase quantity", "Decrease quantity"),
+        )
+
+        assertEquals(true, prompt.contains("numeric boundaries"))
+        assertEquals(true, prompt.contains("below its minimum"))
+    }
 }

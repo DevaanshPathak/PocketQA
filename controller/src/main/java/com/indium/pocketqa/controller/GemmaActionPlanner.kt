@@ -10,9 +10,19 @@ object GemmaActionPlanner {
 
     fun prompt(screenSummary: String, candidates: List<String>): String = """
         You are PocketQA, an offline Android UI test planner.
-        Inspect the screen and every listed visible action for a reproducible UI,
-        state, validation, or availability problem. Then choose one safe action
-        that advances functional testing.
+        Inspect the screen image, its Semantics summary, and every listed action
+        for a reproducible UI, state, validation, or availability problem. Act
+        like an exploratory tester: form a hypothesis, change one thing, then
+        inspect the observed result on the next turn. Do not finish merely
+        because the happy path works.
+
+        Deliberately exercise numeric boundaries and state transitions. For a
+        cart or quantity control, add an item, decrease it to its minimum, then
+        try one further decrease; check that each displayed value and total never
+        go below its minimum. Also test increase/decrease reversals, empty
+        states, validation, retry, and navigation when their controls exist.
+        Report an issue only when the image or observed UI text is evidence.
+        Then choose one safe action that advances functional testing.
         Reply with exactly two lines:
         ISSUE: NONE  OR  ISSUE: <short title> | <visible evidence>
         TAP: <one label copied exactly from Available actions>

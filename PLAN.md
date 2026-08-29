@@ -418,6 +418,28 @@ stops only with a precise user, model, loop, thermal, or memory reason.
 **Exit criteria:** every Gemma visual issue opens local source, produces a
 scoped diff or honest source-mapping uncertainty, and saves offline.
 
+### E. Use a two-stage local diagnosis and patch pipeline
+
+- [ ] Add a lightweight on-device SLM triage step before patch generation. It
+  classifies the evidence as UI, state, data-validation, lifecycle, crash, or
+  unknown; assigns severity and confidence; and proposes a compact source/RAG
+  query. This stage does not generate code.
+- [ ] Send only actionable, sufficiently confident triage results to Gemma 4
+  for diagnosis and patch generation. Its context contains the category,
+  screenshot evidence, trace, crash report (if present), and only the local
+  source chunks retrieved for the issue.
+- [ ] If the SLM is uncertain, request more exploration evidence or present an
+  issue without a patch. If Gemma cannot map the issue to retrieved source, it
+  must abstain rather than inventing a diff.
+- [ ] Require Gemma to return a scoped unified diff and cite the `sourceKey`
+  and line ranges used. Validate that every changed path is in the local corpus
+  manifest, reject traversal or oversized diffs, and never auto-apply a patch.
+- [ ] Save and share the validated patch only after presenting it to the user.
+
+**Exit criteria:** each patchable issue has a local triage category, confidence,
+retrieval evidence, source citations, and a manifest-scoped diff; uncertain
+issues remain evidence-backed reports rather than hallucinated fixes.
+
 ## Acceptance checks
 
 | Behavior | Evidence |

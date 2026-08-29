@@ -137,11 +137,28 @@ class PocketQaAccessibilityService : AccessibilityService() {
                 handler.post { stopAutonomousForModel("model unavailable") }
                 return@initialize
             }
-            modelRuntime.runSmokePrompt(GemmaActionPlanner.prompt(screenDescription.ifBlank { snapshot.className }, candidates)) { result ->
-                val response = (result as? ModelPromptResult.Success)?.text.orEmpty()
-                val assessment = GemmaActionPlanner.assess(response, candidates)
-                val failure = (result as? ModelPromptResult.Failed)?.message
-                handler.post { applyAutonomousChoice(assessment, response, failure) }
+            ScreenshotCapture.capture(this) { captureResult ->
+                when (captureResult) {
+                    is ScreenshotCapture.CaptureResult.Success -> {
+                        PocketQaSessionStore.recordScreenshot(captureResult.file.absolutePath)
+                        PocketQaSessionStore.record(
+                            "visual",
+                            "Gemma autonomous screenshot captured (${captureResult.width}x${captureResult.height})",
+                        )
+                        modelRuntime.runVisionPrompt(
+                            captureResult.file,
+                            GemmaActionPlanner.prompt(screenDescription.ifBlank { snapshot.className }, candidates),
+                        ) { result ->
+                            val response = (result as? ModelPromptResult.Success)?.text.orEmpty()
+                            val assessment = GemmaActionPlanner.assess(response, candidates)
+                            val failure = (result as? ModelPromptResult.Failed)?.message
+                            handler.post { applyAutonomousChoice(assessment, response, failure) }
+                        }
+                    }
+                    is ScreenshotCapture.CaptureResult.Failed -> handler.post {
+                        stopAutonomousForModel("vision screenshot unavailable: ${captureResult.reason}")
+                    }
+                }
             }
         }
     }
@@ -689,7 +706,7 @@ class PocketQaAccessibilityService : AccessibilityService() {
         private const val VISUAL_ATTEMPT_LIMIT = 2
         private const val SPARSE_SEMANTICS_THRESHOLD = 2
         private val AUTONOMOUS_REVISITABLE_LABELS = setOf(
-            "Shopping cart", "ORDER NOW", "Place Order", "Decrease quantity",
+            "Shopping cart", "ORDER NOW", "Place Order", "Increase quantity", "Decrease quantity",
             "APPLY", "Checkout", "Your Cart",
         )
     }
