@@ -23,6 +23,8 @@ class PocketQaAccessibilityService : AccessibilityService() {
     private val autonomousVisitedLabels = mutableSetOf<String>()
     private val autonomousLabelActionCounts = mutableMapOf<String, Int>()
     private val autonomousRejectedReplies = mutableListOf<String>()
+    private var autonomousLastFingerprint: String? = null
+    private var autonomousLastAction: String? = null
     private var autonomousInitialProbeScheduled = false
     private var visualFallbackAttempts = 0
     private var visualFallbackInFlight = false
@@ -57,6 +59,8 @@ class PocketQaAccessibilityService : AccessibilityService() {
         autonomousVisitedLabels.clear()
         autonomousLabelActionCounts.clear()
         autonomousRejectedReplies.clear()
+        autonomousLastFingerprint = null
+        autonomousLastAction = null
         autonomousInitialProbeScheduled = false
         visualFallbackAttempts = 0
         visualFallbackInFlight = false
@@ -114,7 +118,14 @@ class PocketQaAccessibilityService : AccessibilityService() {
                         (autonomousLabelActionCounts[label] ?: 0) >= MAX_REPEATED_LABEL_ACTIONS)
             }
             .take(MAX_MODEL_CANDIDATES)
+        val fingerprint = (snapshot.labels() + candidates).joinToString("|").hashCode().toString()
+        val screenChanged = autonomousLastFingerprint?.let { it != fingerprint }
+        autonomousLastFingerprint = fingerprint
         if (candidates.isEmpty()) {
+            if (actionCount > 0 && autonomousLastAction != null) {
+                diagnoseAutonomousTerminal(snapshot)
+                return
+            }
             if (!autonomousInitialProbeScheduled && actionCount == 0) {
                 autonomousInitialProbeScheduled = true
                 gemmaPlanningInFlight = true
@@ -158,6 +169,8 @@ class PocketQaAccessibilityService : AccessibilityService() {
                                 screenWidth = captureResult.width,
                                 screenHeight = captureResult.height,
                                 rejectedReplies = autonomousRejectedReplies,
+                                previousAction = autonomousLastAction,
+                                screenChanged = screenChanged,
                             ),
                         ) { result ->
                             val response = (result as? ModelPromptResult.Success)?.text.orEmpty()
@@ -178,6 +191,41 @@ class PocketQaAccessibilityService : AccessibilityService() {
                     }
                     is ScreenshotCapture.CaptureResult.Failed -> handler.post {
                         stopAutonomousForModel("vision screenshot unavailable: ${captureResult.reason}")
+                    }
+                }
+            }
+        }
+    }
+
+    /** Gives the VLM one evidence-only turn before a no-action screen ends a run. */
+    private fun diagnoseAutonomousTerminal(snapshot: SemanticNode) {
+        if (gemmaPlanningInFlight) return
+        gemmaPlanningInFlight = true
+        PocketQaSessionStore.record("model", "No unexplored actions; Gemma is diagnosing the terminal screen")
+        ScreenshotCapture.capture(this) { capture ->
+            if (capture !is ScreenshotCapture.CaptureResult.Success) {
+                handler.post { stopAutonomousForModel("terminal screenshot unavailable") }
+                return@capture
+            }
+            modelRuntime.initialize { load ->
+                if (load !is ModelLoadResult.Ready) {
+                    handler.post { stopAutonomousForModel("model unavailable") }
+                    return@initialize
+                }
+                val prompt = """
+                    You are PocketQA. Inspect this terminal app screen after the action: $autonomousLastAction.
+                    Semantics: ${snapshot.labels().take(MAX_SCREEN_LABELS).joinToString(" | ")}
+                    Did the action fail to change the UI, expose an invalid state, crash, or violate an expected invariant?
+                    Reply exactly: ISSUE: NONE OR ISSUE: <short title> | <visible evidence>
+                """.trimIndent()
+                modelRuntime.runVisionPrompt(capture.file, prompt) { result ->
+                    val text = (result as? ModelPromptResult.Success)?.text.orEmpty()
+                    val assessment = GemmaActionPlanner.assess(text, emptyList(), capture.width, capture.height)
+                    handler.post {
+                        gemmaPlanningInFlight = false
+                        assessment.issueTitle?.let { found("Gemma: $it", assessment.issueEvidence ?: "Terminal-screen evidence") }
+                        PocketQaSessionStore.record("model", "Gemma terminal diagnosis: ${text.take(160).replace('\n', ' ')}")
+                        finishRun()
                     }
                 }
             }
@@ -213,6 +261,7 @@ class PocketQaAccessibilityService : AccessibilityService() {
         if (coordinate != null) {
             val (x, y) = coordinate
             PocketQaSessionStore.record("model", "Gemma selected visual tap: ($x, $y) on ${screenWidth}x${screenHeight}")
+            autonomousLastAction = "visual tap ($x,$y)"
             if (consumeAction("visual_tap", "($x, $y) (Gemma autonomous)")) {
                 GestureDispatcher.tapAt(this, x, y)
             }
@@ -234,6 +283,7 @@ class PocketQaAccessibilityService : AccessibilityService() {
         }
         autonomousVisitedLabels += label
         autonomousLabelActionCounts[label] = (autonomousLabelActionCounts[label] ?: 0) + 1
+        autonomousLastAction = "tap $label"
         PocketQaSessionStore.record("model", "Gemma selected: $label")
         if (consumeAction("tap", "$label (Gemma autonomous)")) node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
         node.recycle()
