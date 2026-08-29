@@ -147,11 +147,6 @@ class PocketQaAccessibilityService : AccessibilityService() {
                 // The current QuickCart product cards expose quantity controls,
                 // not an ADD button. Reuse an existing cart state through its
                 // accessible CTA, or seed one item before opening the cart.
-                if (labels.any { it.startsWith("View Cart") }) {
-                    step = RunStep.WAIT_CART
-                    clickByPrefix("View Cart")
-                    return
-                }
                 val increase = findByLabel(root, "Increase quantity")
                 if (increase != null) {
                     if (consumeAction("tap", "Increase quantity to seed cart")) {
@@ -160,6 +155,11 @@ class PocketQaAccessibilityService : AccessibilityService() {
                     increase.recycle()
                     step = RunStep.WAIT_CART
                     handler.postDelayed({ clickByPrefix("View Cart") }, 700)
+                    return
+                }
+                if (labels.any { it.startsWith("View Cart") }) {
+                    step = RunStep.WAIT_CART
+                    clickByPrefix("View Cart")
                     return
                 }
 
@@ -187,7 +187,17 @@ class PocketQaAccessibilityService : AccessibilityService() {
                     val currentLabels = current.toSnapshot().labels()
                     if (currentLabels.any { it.trim() == "-1" || it.endsWith(" -1") }) {
                         found("Quantity zero boundary failure", "QuickCart showed quantity -1 after two decrease actions")
-                    } else PocketQaSessionStore.record("detector", "QuickCart quantity lower-bound check completed")
+                    } else {
+                        val quantityControl = findByLabel(current, "Decrease quantity")
+                        val stillHasQuantityControl = quantityControl != null
+                        quantityControl?.recycle()
+                        if (!stillHasQuantityControl) {
+                            current.recycle()
+                            skipCurrentCheck("Quantity boundary check skipped: the cart has no active line item after the mutation")
+                            return@postDelayed
+                        }
+                        PocketQaSessionStore.record("detector", "QuickCart quantity lower-bound check completed")
+                    }
                     current.recycle()
                     step = RunStep.WAIT_CHECKOUT
                     clickContaining("Proceed to Checkout")
@@ -243,10 +253,6 @@ class PocketQaAccessibilityService : AccessibilityService() {
         val candidates = rootInActiveWindow?.toSnapshot()?.labels().orEmpty()
         val choice = response?.let { GemmaActionPlanner.chooseLabel(it, candidates) }
         when {
-            choice?.startsWith("View Cart") == true || candidates.any { it.startsWith("View Cart") } -> {
-                step = RunStep.WAIT_CART
-                clickByPrefix("View Cart")
-            }
             choice == "Increase quantity" || candidates.any { it == "Increase quantity" } -> {
                 val root = rootInActiveWindow ?: return
                 val increase = findByLabel(root, "Increase quantity")
@@ -257,6 +263,10 @@ class PocketQaAccessibilityService : AccessibilityService() {
                 root.recycle()
                 step = RunStep.WAIT_CART
                 handler.postDelayed({ clickByPrefix("View Cart") }, 700)
+            }
+            choice?.startsWith("View Cart") == true || candidates.any { it.startsWith("View Cart") } -> {
+                step = RunStep.WAIT_CART
+                clickByPrefix("View Cart")
             }
             else -> tapQuickCartAdd()
         }
@@ -715,6 +725,13 @@ class PocketQaAccessibilityService : AccessibilityService() {
         Log.i(TAG, "RUN COMPLETE: ${findings.size}/5 bugs found")
         startActivity(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         handler.postDelayed({ testingOverlay.hide() }, 1800)
+    }
+
+    /** A missing screen precondition is not a finding and must not cause unsafe navigation. */
+    private fun skipCurrentCheck(reason: String) {
+        PocketQaSessionStore.record("skip", reason)
+        testingOverlay.show("PocketQA AI\nSkipping unavailable check\nNo unsafe action taken")
+        finishRun()
     }
 
     private fun failRun(message: String) {
