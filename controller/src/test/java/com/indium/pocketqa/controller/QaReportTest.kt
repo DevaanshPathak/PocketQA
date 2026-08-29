@@ -7,12 +7,12 @@ class QaReportTest {
     @Test
     fun `report distinguishes detected bugs from pending checks`() {
         val report = QaReport.render(
-            listOf(BugFinding("Cart quantity goes below zero", "Observed quantity -1")),
+            listOf(BugFinding("Quantity zero boundary failure", "Observed quantity -1")),
             running = true
         )
 
-        assertTrue(report.contains("1/5 bugs found"))
-        assertTrue(report.contains("● Cart quantity goes below zero"))
-        assertTrue(report.contains("○ Third grocery item fails to render"))
+        assertTrue(report.contains("1/14 bugs found"))
+        assertTrue(report.contains("Quantity zero boundary failure"))
+        assertTrue(report.contains("Rapid cart quantity update race"))
     }
 }

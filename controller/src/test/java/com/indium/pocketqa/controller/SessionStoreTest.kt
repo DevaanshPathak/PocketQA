@@ -46,4 +46,15 @@ class SessionStoreTest {
 
         assertEquals(ExplorationMode.GEMMA_AUTONOMOUS, store.snapshot().explorationMode)
     }
+
+    @Test
+    fun `a finding retains the screenshot captured at its evidence point`() {
+        val store = SessionStore()
+        store.start(TestGoal.FULL_SCAN, ExplorationMode.GEMMA_ASSISTED)
+        store.recordFinding(BugFinding("Quantity zero boundary failure", "Observed -1"))
+
+        store.attachFindingScreenshot("Quantity zero boundary failure", "/cache/bug-05.png")
+
+        assertEquals("/cache/bug-05.png", store.snapshot().findings.single().screenshotPath)
+    }
 }

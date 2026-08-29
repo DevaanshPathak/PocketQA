@@ -596,9 +596,7 @@ class MainActivity : Activity() {
         contentContainer.addView(btnStop)
 
         // If findings detected, render Bug Detected Card
-        if (snapshot.findings.isNotEmpty()) {
-            renderBugDetectedCard(snapshot.findings.first())
-        }
+        snapshot.findings.forEach(::renderBugDetectedCard)
     }
 
     // --- SCREEN 3: CRASH DETECTED CARD ---
@@ -628,15 +626,26 @@ class MainActivity : Activity() {
         metaTv.setPadding(0, 2, 0, 10)
         crashCard.addView(metaTv)
 
-        crashCard.addView(createFieldLabel("EXCEPTION SUMMARY"))
-        crashCard.addView(createTextView("Null check operator used on a null value", color = Color.parseColor("#FFB4AB"), textSize = 13f, bold = true))
-        crashCard.addView(createTextView("📁 Location: profile_screen.dart", color = Color.parseColor("#4EDEA3"), textSize = 11f, mono = true))
+        val diagnosis = KnownBugCatalog.diagnose(finding)
+        crashCard.addView(createFieldLabel("OBSERVED ISSUE"))
+        crashCard.addView(createTextView(finding.title, color = Color.parseColor("#FFB4AB"), textSize = 13f, bold = true))
+        crashCard.addView(createTextView("Source: ${diagnosis.sourceKey}", color = Color.parseColor("#4EDEA3"), textSize = 11f, mono = true))
+        finding.screenshotPath?.takeIf { File(it).isFile }?.let { evidencePath ->
+            crashCard.addView(createTextView("SCREENSHOT EVIDENCE CAPTURED", color = Color.parseColor("#4EDEA3"), textSize = 10f, bold = true))
+            crashCard.addView(ImageView(this).apply {
+                setImageBitmap(android.graphics.BitmapFactory.decodeFile(evidencePath))
+                scaleType = ImageView.ScaleType.CENTER_CROP
+                layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 150.dpToPx()).apply {
+                    setMargins(0, 6, 0, 4)
+                }
+            })
+        }
 
         crashCard.addView(createTextView("\n<> STACK TRACE EVIDENCE", color = Color.parseColor("#8C909F"), textSize = 10f, bold = true))
-        crashCard.addView(createCodeBlock("Exception: Null check operator used on a null value\n#0 ProfileScreenState._saveProfile (profile_screen.dart:142:35)\n#1 _InkResponseState.handleTap\n#2 GestureRecognizer.invokeCallback"))
+        crashCard.addView(createCodeBlock(finding.evidence))
 
         crashCard.addView(createTextView("📈 REPRODUCTION STEPS", color = Color.parseColor("#8C909F"), textSize = 10f, bold = true))
-        crashCard.addView(createTextView("1. Open Profile\n2. Select Edit Profile\n3. Cancel profile image\n4. Tap Save [CRASH TRIGGERED]", color = Color.parseColor("#E2E1EB"), textSize = 11f))
+        crashCard.addView(createTextView(diagnosis.reproduction, color = Color.parseColor("#E2E1EB"), textSize = 11f))
 
         val btnDiag = Button(this).apply {
             text = "🔧  Diagnose"
@@ -681,7 +690,7 @@ class MainActivity : Activity() {
 
         // When source is not linked, keep the diagnosis useful by locating the
         // observed defect in the captured screen rather than fabricating code.
-        val screenshotPath = latestAvailableScreenshot(snapshot)
+        val screenshotPath = latestAvailableScreenshot(snapshot, finding)
         if (repoCorpus == null && screenshotPath != null && visualHighlightRequestedFor != screenshotPath) {
             visualHighlightRequestedFor = screenshotPath
             runVisualBugHighlight(finding, screenshotPath)
@@ -705,7 +714,7 @@ class MainActivity : Activity() {
             contentContainer.addView(createAccentCard("Visual Highlight", status, borderAccent = Color.parseColor("#3B82F6")))
         }
         contentContainer.addView(createSecondaryButton("SHOW VISUAL HIGHLIGHT EXAMPLE") {
-            val path = latestAvailableScreenshot(PocketQaSessionStore.snapshot())
+            val path = latestAvailableScreenshot(PocketQaSessionStore.snapshot(), finding)
             if (path == null) {
                 Toast.makeText(this, "Run QuickCart once to capture a screenshot first.", Toast.LENGTH_LONG).show()
             } else {
@@ -863,7 +872,8 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun latestAvailableScreenshot(snapshot: SessionSnapshot): String? {
+    private fun latestAvailableScreenshot(snapshot: SessionSnapshot, finding: BugFinding? = null): String? {
+        finding?.screenshotPath?.takeIf { File(it).isFile }?.let { return it }
         snapshot.screenshotPath?.takeIf { File(it).isFile }?.let { return it }
         return File(cacheDir, "screenshots").listFiles()
             ?.filter { it.isFile && it.extension.equals("png", ignoreCase = true) }

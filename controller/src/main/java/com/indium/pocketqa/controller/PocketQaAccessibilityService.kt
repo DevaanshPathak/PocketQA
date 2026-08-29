@@ -785,8 +785,22 @@ class PocketQaAccessibilityService : AccessibilityService() {
     }
 
     private fun found(title: String, evidence: String) {
-        if (findings.none { it.title == title }) findings += BugFinding(title, evidence)
-        PocketQaSessionStore.recordFinding(BugFinding(title, evidence))
+        if (findings.any { it.title == title }) return
+        val finding = BugFinding(title, evidence)
+        findings += finding
+        PocketQaSessionStore.recordFinding(finding)
+        // Preserve the exact UI state that caused this issue. Capture is
+        // asynchronous, so the finding remains visible even if MediaProjection
+        // is unavailable; the screenshot is attached when it completes.
+        ScreenshotCapture.capture(this) { result ->
+            if (result is ScreenshotCapture.CaptureResult.Success) {
+                PocketQaSessionStore.recordScreenshot(result.file.absolutePath)
+                PocketQaSessionStore.attachFindingScreenshot(title, result.file.absolutePath)
+                PocketQaSessionStore.record("visual", "Evidence screenshot saved for $title")
+            } else {
+                PocketQaSessionStore.record("visual", "Evidence screenshot unavailable for $title")
+            }
+        }
         testingOverlay.show("PocketQA AI\nIssue found\n$title")
         Log.i(TAG, "BUG FOUND: $title - $evidence")
     }

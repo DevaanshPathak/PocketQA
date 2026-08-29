@@ -63,6 +63,13 @@ open class SessionStore {
         snapshot.copy(findings = findings)
     }
 
+    /** Associates immutable evidence with the named finding without changing its position. */
+    fun attachFindingScreenshot(title: String, path: String) = update { snapshot ->
+        snapshot.copy(findings = snapshot.findings.map { finding ->
+            if (finding.title == title) finding.copy(screenshotPath = path) else finding
+        })
+    }
+
     fun complete() = update { it.copy(status = RunStatus.COMPLETE) }
     fun stop() = update { it.copy(status = RunStatus.STOPPED) }
     fun fail(message: String) = update { it.copy(status = RunStatus.ERROR, error = message) }
