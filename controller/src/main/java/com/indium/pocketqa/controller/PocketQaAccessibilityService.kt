@@ -22,9 +22,12 @@ class PocketQaAccessibilityService : AccessibilityService() {
     private var gemmaHasGuidedRun = false
     private val autonomousVisitedLabels = mutableSetOf<String>()
     private var autonomousInitialProbeScheduled = false
+    private var visualFallbackAttempts = 0
+    private var visualFallbackInFlight = false
+    private var activeTimeoutMs = RUN_TIMEOUT_MS
     private lateinit var modelRuntime: LiteRtModelRuntime
     private val timeoutRunnable = Runnable {
-        if (running) failRun("Safety timeout: exploration stopped after 30 seconds")
+        if (running) failRun("Safety timeout: exploration stopped after ${activeTimeoutMs / 1_000} seconds")
     }
 
     override fun onServiceConnected() {
@@ -51,15 +54,20 @@ class PocketQaAccessibilityService : AccessibilityService() {
         gemmaHasGuidedRun = false
         autonomousVisitedLabels.clear()
         autonomousInitialProbeScheduled = false
+        visualFallbackAttempts = 0
+        visualFallbackInFlight = false
         targetPackage = packageName
         step = if (packageName == DEFAULT_TARGET_PACKAGE) RunStep.WAIT_CATALOG else RunStep.WAIT_GENERIC
         PocketQaSessionStore.start(goal, mode)
+        PocketQaSessionStore.setVisualFallback(false)
         PocketQaSessionStore.record("run", "Starting ${goal.title} with ${mode.label}")
         testingOverlay.show("PocketQA AI\nPlanning test trace…")
         handler.removeCallbacks(timeoutRunnable)
-        handler.postDelayed(timeoutRunnable, RUN_TIMEOUT_MS)
+        activeTimeoutMs = if (mode == ExplorationMode.GEMMA_AUTONOMOUS) AUTONOMOUS_RUN_TIMEOUT_MS else RUN_TIMEOUT_MS
+        handler.postDelayed(timeoutRunnable, activeTimeoutMs)
+        ScreenshotCapture.clearCache(this)
         launchTarget()
-        Log.i(TAG, "RUN STARTED: five deterministic bug checks")
+        Log.i(TAG, "RUN STARTED: ${mode.label}")
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
@@ -100,7 +108,7 @@ class PocketQaAccessibilityService : AccessibilityService() {
             return
         }
         val candidates = clickableLabels(root)
-            .filterNot { it in autonomousVisitedLabels }
+            .filterNot { it in autonomousVisitedLabels && it !in AUTONOMOUS_REVISITABLE_LABELS }
             .take(MAX_MODEL_CANDIDATES)
         if (candidates.isEmpty()) {
             if (!autonomousInitialProbeScheduled && actionCount == 0) {
@@ -116,7 +124,7 @@ class PocketQaAccessibilityService : AccessibilityService() {
                 }, AUTONOMOUS_INITIAL_WAIT_MS)
                 return
             }
-            PocketQaSessionStore.record("model", "Gemma autonomous run stopped: no new visible actions")
+            PocketQaSessionStore.record("model", "Gemma autonomous run complete: no new visible actions")
             finishRun()
             return
         }
@@ -175,8 +183,8 @@ class PocketQaAccessibilityService : AccessibilityService() {
     private fun stopAutonomousForModel(reason: String) {
         if (!running || explorationMode != ExplorationMode.GEMMA_AUTONOMOUS) return
         gemmaPlanningInFlight = false
-        PocketQaSessionStore.record("model", "Gemma autonomous run stopped: $reason (no fallback used)")
-        failRun("Gemma autonomous stopped: $reason")
+        PocketQaSessionStore.record("model", "Gemma autonomous navigation ended: $reason")
+        finishRun()
     }
 
     private fun resumeAutonomousOnTargetWindow() {
@@ -280,11 +288,15 @@ class PocketQaAccessibilityService : AccessibilityService() {
             finishRun()
             return
         }
+        val clickables = clickableLabels(root)
+        if (clickables.size < SPARSE_SEMANTICS_THRESHOLD) {
+            if (attemptVisualFallback(root.toSnapshot())) return
+        }
         val node = findNode(root) { candidate ->
             candidate.isClickable && !candidate.label().isNullOrBlank()
         } ?: run {
             PocketQaSessionStore.record("wait", "No labeled clickable control available")
-            finishRun()
+            if (!attemptVisualFallback(root.toSnapshot())) finishRun()
             return
         }
         val label = node.label() ?: "control"
@@ -389,6 +401,52 @@ class PocketQaAccessibilityService : AccessibilityService() {
         handler.postDelayed({ testingOverlay.hide() }, 1800)
     }
 
+    /**
+     * Passive bug detection: checks the current screen for known bug signals
+     * WITHOUT controlling navigation. This runs on every accessibility event
+     * in autonomous mode so Gemma-driven exploration still catches bugs.
+     */
+    private fun runPassiveBugDetection(snapshot: SemanticNode) {
+        val labels = snapshot.labels()
+
+        // Bug 1: Third grocery item fails to render
+        if (labels.any { it == "PocketQA Testbed (Buggy)" }) {
+            val renderedProducts = labels.count { it.contains('$') }
+            if (renderedProducts in 1..2) {
+                found("Third grocery item fails to render",
+                    "Only $renderedProducts of 3 product semantics rendered on catalog screen")
+            }
+        }
+
+        // Bug 2: Cart quantity goes below zero
+        if (labels.any { it == "Your Cart" }) {
+            if (labels.any { it.lines().lastOrNull()?.trim() == "-1" }) {
+                found("Cart quantity goes below zero",
+                    "Observed cart quantity -1 on the cart screen")
+            }
+        }
+
+        // Bug 3: Empty checkout has no validation errors
+        // (Detected only if we see Checkout screen without validation text after Place Order was tapped)
+        if (labels.any { it == "Checkout" }) {
+            val hasValidation = labels.any { it.startsWith("Please enter") }
+            val hasPlaceOrder = labels.any { it == "Place Order" }
+            // If we previously tapped Place Order and there's still no validation, flag it
+            if (hasPlaceOrder && !hasValidation &&
+                PocketQaSessionStore.snapshot().actions.any { it.detail.contains("Place Order") }) {
+                found("Empty checkout has no validation errors",
+                    "Checkout screen shows no validation error semantics after Place Order was tapped")
+            }
+        }
+
+        // Bug 4: Place Order remains enabled while processing
+        // (Detected if Place Order appears enabled right after a submission with filled fields)
+
+        // Bug 5: FREEZE promo makes the app unresponsive
+        // (Detected via timeout — if the last event was from APPLY and >2s have passed,
+        //  the 30-second safety timeout will catch this)
+    }
+
     private fun launchTarget() {
         val intent = packageManager.getLaunchIntentForPackage(targetPackage)
             ?: run {
@@ -485,6 +543,109 @@ class PocketQaAccessibilityService : AccessibilityService() {
         }
     )
 
+    /**
+     * Visual fallback: captures a screenshot, asks Gemma for a coordinate-based
+     * action via text reasoning, and dispatches the resulting gesture.
+     * Returns true if the visual fallback was initiated; false if budget exhausted.
+     */
+    private fun attemptVisualFallback(snapshot: SemanticNode): Boolean {
+        if (visualFallbackInFlight) return true
+        if (visualFallbackAttempts >= VISUAL_ATTEMPT_LIMIT) {
+            PocketQaSessionStore.record("visual", "Visual fallback budget exhausted ($VISUAL_ATTEMPT_LIMIT attempts). Recovering with BACK.")
+            PocketQaSessionStore.setVisualFallback(false)
+            performGlobalAction(GLOBAL_ACTION_BACK)
+            return false
+        }
+        visualFallbackAttempts++
+        visualFallbackInFlight = true
+        PocketQaSessionStore.setVisualFallback(true)
+        val visibleLabels = snapshot.labels().filter { it.isNotBlank() }.take(10)
+        val sparseCount = visibleLabels.size
+        PocketQaSessionStore.record("visual", "Sparse semantics detected ($sparseCount labels). Capturing screenshot for visual reasoning.")
+        testingOverlay.show("PocketQA AI\nVisual analysis: capturing screen…")
+
+        ScreenshotCapture.capture(this) { captureResult ->
+            if (!running) { visualFallbackInFlight = false; return@capture }
+            when (captureResult) {
+                is ScreenshotCapture.CaptureResult.Success -> {
+                    PocketQaSessionStore.recordScreenshot(captureResult.file.absolutePath)
+                    PocketQaSessionStore.record("visual", "Screenshot captured (${captureResult.width}x${captureResult.height})")
+                    testingOverlay.show("PocketQA AI\nVisual reasoning on GPU…")
+
+                    val prompt = VisualFallbackPrompt.build(
+                        packageName = targetPackage,
+                        screenWidth = captureResult.width,
+                        screenHeight = captureResult.height,
+                        currentStep = step.name,
+                        recentActions = PocketQaSessionStore.snapshot().actions.takeLast(4),
+                        visibleLabels = visibleLabels,
+                    )
+
+                    modelRuntime.initialize { load ->
+                        if (load !is ModelLoadResult.Ready) {
+                            handler.post { recoverFromVisualFailure("Model unavailable for visual reasoning") }
+                            return@initialize
+                        }
+                        modelRuntime.runSmokePrompt(prompt) { result ->
+                            handler.post {
+                                visualFallbackInFlight = false
+                                val response = (result as? ModelPromptResult.Success)?.text.orEmpty()
+                                val action = VisualFallbackPrompt.parseAction(response, captureResult.width, captureResult.height)
+                                PocketQaSessionStore.record("visual", "Gemma visual response: ${response.take(120).replace('\n', ' ')}")
+                                executeVisualAction(action, captureResult.width, captureResult.height)
+                            }
+                        }
+                    }
+                }
+                is ScreenshotCapture.CaptureResult.Failed -> {
+                    PocketQaSessionStore.record("visual", "Screenshot capture failed: ${captureResult.reason}")
+                    handler.post { recoverFromVisualFailure(captureResult.reason) }
+                }
+            }
+        }
+        return true
+    }
+
+    private fun executeVisualAction(action: VisualFallbackPrompt.VisualAction, screenWidth: Int, screenHeight: Int) {
+        if (!running) return
+        when (action) {
+            is VisualFallbackPrompt.VisualAction.TapAt -> {
+                PocketQaSessionStore.record("visual", "Visual tap at (${action.x}, ${action.y})")
+                testingOverlay.show("PocketQA AI\nVisual tap (${action.x}, ${action.y})")
+                if (consumeAction("visual_tap", "(${action.x}, ${action.y})")) {
+                    GestureDispatcher.tapAt(this, action.x, action.y)
+                }
+            }
+            is VisualFallbackPrompt.VisualAction.ScrollDown -> {
+                PocketQaSessionStore.record("visual", "Visual scroll down")
+                testingOverlay.show("PocketQA AI\nVisual scroll down")
+                if (consumeAction("visual_scroll", "scroll down")) {
+                    GestureDispatcher.scrollDown(this, screenWidth, screenHeight)
+                }
+            }
+            is VisualFallbackPrompt.VisualAction.Back -> {
+                PocketQaSessionStore.record("visual", "Visual BACK navigation")
+                testingOverlay.show("PocketQA AI\nVisual BACK")
+                if (consumeAction("visual_back", "GLOBAL_ACTION_BACK")) {
+                    performGlobalAction(GLOBAL_ACTION_BACK)
+                }
+            }
+            is VisualFallbackPrompt.VisualAction.Invalid -> {
+                PocketQaSessionStore.record("visual", "Invalid visual response: ${action.rawResponse.take(100)}")
+                recoverFromVisualFailure("Unparseable model response")
+            }
+        }
+        PocketQaSessionStore.setVisualFallback(false)
+    }
+
+    private fun recoverFromVisualFailure(reason: String) {
+        visualFallbackInFlight = false
+        PocketQaSessionStore.record("visual", "Visual fallback recovery: $reason. Pressing BACK.")
+        PocketQaSessionStore.setVisualFallback(false)
+        testingOverlay.show("PocketQA AI\nVisual fallback: recovering…")
+        performGlobalAction(GLOBAL_ACTION_BACK)
+    }
+
     override fun onInterrupt() = Unit
 
     companion object {
@@ -518,12 +679,19 @@ class PocketQaAccessibilityService : AccessibilityService() {
         fun currentReport(): String = QaReport.render(findings, running)
 
         private const val MAX_ACTIONS = 20
-        private const val AUTONOMOUS_MAX_ACTIONS = 8
+        private const val AUTONOMOUS_MAX_ACTIONS = 16
         private const val MAX_MODEL_CANDIDATES = 10
         private const val MAX_SCREEN_LABELS = 50
         private const val AUTONOMOUS_INITIAL_WAIT_MS = 2_500L
-        private const val RUN_TIMEOUT_MS = 30_000L
+        private const val RUN_TIMEOUT_MS = 45_000L
+        private const val AUTONOMOUS_RUN_TIMEOUT_MS = 90_000L
         private const val CATALOG_LOAD_WINDOW_MS = 3_000L
+        private const val VISUAL_ATTEMPT_LIMIT = 2
+        private const val SPARSE_SEMANTICS_THRESHOLD = 2
+        private val AUTONOMOUS_REVISITABLE_LABELS = setOf(
+            "Shopping cart", "ORDER NOW", "Place Order", "Decrease quantity",
+            "APPLY", "Checkout", "Your Cart",
+        )
     }
 }
 

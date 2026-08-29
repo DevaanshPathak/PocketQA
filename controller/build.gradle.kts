@@ -13,7 +13,7 @@ android {
 
     defaultConfig {
         applicationId = "com.indium.pocketqa.controller"
-        minSdk = 26
+        minSdk = 30
         targetSdk = 34
         versionCode = 1
         versionName = "0.1"

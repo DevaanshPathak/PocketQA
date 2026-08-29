@@ -29,6 +29,8 @@ data class SessionSnapshot(
     val actions: List<ActionEvent> = emptyList(),
     val findings: List<BugFinding> = emptyList(),
     val error: String? = null,
+    val screenshotPath: String? = null,
+    val visualFallbackActive: Boolean = false,
 )
 
 /** Thread-safe in-memory state for the visible current PocketQA run. */
@@ -62,6 +64,8 @@ open class SessionStore {
     fun complete() = update { it.copy(status = RunStatus.COMPLETE) }
     fun stop() = update { it.copy(status = RunStatus.STOPPED) }
     fun fail(message: String) = update { it.copy(status = RunStatus.ERROR, error = message) }
+    fun recordScreenshot(path: String) = update { it.copy(screenshotPath = path) }
+    fun setVisualFallback(active: Boolean) = update { it.copy(visualFallbackActive = active) }
 
     private fun unsubscribe(listener: (SessionSnapshot) -> Unit) = synchronized(this) { listeners -= listener }
 

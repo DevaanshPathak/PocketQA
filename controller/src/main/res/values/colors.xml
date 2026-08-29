@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Background & Base Surfaces -->
+    <color name="bg_dark">#0F172A</color>        <!-- Slate 900 -->
+    <color name="surface_dark">#1E293B</color>   <!-- Slate 800 -->
+    <color name="card_dark">#334155</color>      <!-- Slate 700 -->
+    <color name="card_border">#475569</color>    <!-- Slate 600 -->
+    <color name="code_bg">#020617</color>        <!-- Slate 950 -->
+
+    <!-- Text Colors -->
+    <color name="text_primary">#F8FAFC</color>   <!-- Slate 50 -->
+    <color name="text_secondary">#94A3B8</color> <!-- Slate 400 -->
+    <color name="text_muted">#64748B</color>     <!-- Slate 500 -->
+
+    <!-- Accents & Indicators -->
+    <color name="accent_cyan">#38BDF8</color>    <!-- Sky 400 - Main Action -->
+    <color name="accent_indigo">#818CF8</color>  <!-- Indigo 400 - Model / AI -->
+    <color name="accent_rose">#F43F5E</color>    <!-- Rose 500 - Alert / Bug -->
+    <color name="accent_emerald">#10B981</color> <!-- Emerald 500 - Pass / Ready -->
+    <color name="accent_amber">#F59E0B</color>   <!-- Amber 500 - Warning -->
+
+    <!-- Semi-transparent Overlays -->
+    <color name="cyan_glow">#2038BDF8</color>
+    <color name="indigo_glow">#20818CF8</color>
+    <color name="rose_glow">#20F43F5E</color>
+    <color name="emerald_glow">#2010B981</color>
+</resources>
