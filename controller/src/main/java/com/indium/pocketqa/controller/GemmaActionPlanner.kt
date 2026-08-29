@@ -25,6 +25,14 @@ object GemmaActionPlanner {
         inspect the observed result on the next turn. Do not finish merely
         because the happy path works.
 
+        Your coverage charter is to explore the whole reachable app, not just
+        the current screen. Before considering the run complete, cover catalog
+        item actions, cart add/remove/quantity boundaries, checkout validation
+        and submission, scrollable content, retry/error states, and navigation
+        back to earlier screens when available. Prefer an unvisited screen or
+        untried control over advancing the happy path. A terminal screen is an
+        observation point, not proof that the app has been fully tested.
+
         Deliberately exercise numeric boundaries and state transitions. For a
         cart or quantity control, add an item, decrease it to its minimum, then
         try one further decrease; check that each displayed value and total never
