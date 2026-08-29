@@ -419,9 +419,14 @@ class MainActivity : Activity() {
         }
 
         val diagnosis = KnownBugCatalog.diagnose(finding)
+        // Prefer the bundled demo corpus, then the app-specific repository
+        // index. This keeps diagnosis offline and makes QuickCart's persisted
+        // bug_app/bugged mapping immediately useful after Clone & Index.
         val source = LocalSourceLookup(this).read(diagnosis.sourceKey)
-            ?.lineSequence()?.take(40)?.joinToString("\n")
-            ?: "Local source file was not found in corpus assets."
+            ?: repoCorpus?.chunks
+                ?.filter { it.sourceKey == diagnosis.sourceKey }
+                ?.joinToString("\n") { it.text }
+            ?: "Local source file was not found. Clone & index the mapped repository folder first."
 
         val titleCard = createAccentCard(
             title = "Issue Diagnosis: ${finding.title}",
