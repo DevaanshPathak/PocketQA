@@ -67,6 +67,9 @@ class LiteRtModelRuntime(context: Context) : AutoCloseable {
                     EngineConfig(
                         modelPath = model.absolutePath,
                         backend = Backend.GPU(),
+                        // An empty vision backend deliberately omits the vision executor.
+                        // The full Gemma E4B artifact therefore needs this explicit GPU path.
+                        visionBackend = Backend.GPU(),
                         maxNumTokens = 512,
                         cacheDir = appContext.cacheDir.absolutePath,
                     ),
