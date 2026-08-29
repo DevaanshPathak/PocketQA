@@ -29,9 +29,11 @@ class AuthProvider extends ChangeNotifier {
         createdAt: DateTime.now(),
         updatedAt: DateTime.now(),
       );
-    } else {
-      _isLoading = false;
     }
+    // A cached Firebase session must never block the offline/demo catalogue on
+    // a Firestore profile round trip. The stream below enriches this local
+    // profile when available, but the app can render immediately either way.
+    _isLoading = false;
     _initAuthStream();
   }
 

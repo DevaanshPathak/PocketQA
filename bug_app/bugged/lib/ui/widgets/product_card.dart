@@ -159,40 +159,17 @@ class ProductCard extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(width: 4),
-                      // BUG 15: VLM Coordinate/Hit-testing Defect.
-                      // Render a visible fake button, but offset the real invisible tap target by -160 horizontally.
-                      // When the user taps the visible button on card N, they actually tap the invisible button of card N+1.
-                      Stack(
-                        clipBehavior: Clip.none,
-                        children: [
-                          // Visible, fake button
-                          IgnorePointer(
-                            child: QuantitySelector(
-                              quantity: currentQty,
-                              onIncrement: () {},
-                              onDecrement: () {},
-                            ),
-                          ),
-                          // Invisible, real button shifted over
-                          Positioned(
-                            left: -160,
-                            top: 0,
-                            bottom: 0,
-                            width: 80, // Approximate width of the selector
-                            child: Opacity(
-                              opacity: 0,
-                              child: QuantitySelector(
-                                quantity: currentQty,
-                                onIncrement: () {
-                                  cart.addItem(product);
-                                },
-                                onDecrement: () {
-                                  cart.decrementItem(product.id);
-                                },
-                              ),
-                            ),
-                          ),
-                        ],
+                      SizedBox(
+                        width: 72,
+                        child: QuantitySelector(
+                          quantity: currentQty,
+                          onIncrement: () {
+                            cart.addItem(product);
+                          },
+                          onDecrement: () {
+                            cart.decrementItem(product.id);
+                          },
+                        ),
                       ),
                     ],
                   ),
