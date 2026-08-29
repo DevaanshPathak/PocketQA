@@ -81,15 +81,18 @@ Start-Sleep -Seconds 1
 & $adb -s $serial shell settings put secure accessibility_enabled 0
 & $adb -s $serial shell settings delete secure enabled_accessibility_services | Out-Null
 Start-Sleep -Seconds 1
-& $adb -s $serial shell settings put secure enabled_accessibility_services $service
-& $adb -s $serial shell settings put secure accessibility_enabled 1
 $serviceDeadline = (Get-Date).AddSeconds(30)
 do {
-    Start-Sleep -Seconds 1
+    # A newly booted emulator can briefly clear accessibility settings while
+    # PackageManager is still registering the freshly installed service.
+    & $adb -s $serial shell settings put secure enabled_accessibility_services $service
+    & $adb -s $serial shell settings put secure accessibility_enabled 1
+    Start-Sleep -Seconds 2
     $accessibilityState = (& $adb -s $serial shell dumpsys accessibility) -join "`n"
 } until ($accessibilityState -match 'Bound services:\{Service\[label=PocketQA Semantics Reader' -or (Get-Date) -gt $serviceDeadline)
 if ($accessibilityState -notmatch 'Bound services:\{Service\[label=PocketQA Semantics Reader') {
-    throw "PocketQA accessibility service did not bind within 30 seconds."
+    $enabledService = (& $adb -s $serial shell settings get secure enabled_accessibility_services).Trim()
+    throw "PocketQA accessibility service did not bind within 30 seconds (enabled_accessibility_services=$enabledService)."
 }
 & $adb -s $serial shell am start -n com.pocketqa.pocketqa/.MainActivity | Out-Null
 Start-Sleep -Seconds 1

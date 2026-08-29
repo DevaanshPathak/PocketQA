@@ -52,15 +52,16 @@ sleep 1
 "$ADB" -s "$SERIAL" shell settings put secure accessibility_enabled 0
 "$ADB" -s "$SERIAL" shell settings delete secure enabled_accessibility_services >/dev/null
 sleep 1
-"$ADB" -s "$SERIAL" shell settings put secure enabled_accessibility_services "$SERVICE"
-"$ADB" -s "$SERIAL" shell settings put secure accessibility_enabled 1
 BOUND=false
 for _ in {1..30}; do
+  # Cold emulators may clear these settings while registering a fresh install.
+  "$ADB" -s "$SERIAL" shell settings put secure enabled_accessibility_services "$SERVICE"
+  "$ADB" -s "$SERIAL" shell settings put secure accessibility_enabled 1
+  sleep 1
   if "$ADB" -s "$SERIAL" shell dumpsys accessibility | grep -q 'Bound services:{Service\[label=PocketQA Semantics Reader'; then
     BOUND=true
     break
   fi
-  sleep 1
 done
 [[ "$BOUND" == true ]] || { echo "PocketQA accessibility service did not bind within 30 seconds." >&2; exit 1; }
 "$ADB" -s "$SERIAL" shell am start -n com.pocketqa.pocketqa/.MainActivity >/dev/null

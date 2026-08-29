@@ -1,5 +1,9 @@
 .gradle/
+.kotlin/
 **/build/
 bug_app/.dart_tool/
 bug_app/.flutter-plugins*
 local.properties
+model_artifacts/
+*.log
+*.litertlm
