@@ -60,6 +60,12 @@ class RepoCloneManager(context: Context) {
         }.getOrNull()
     }
 
+    /** Removes only the target-to-repository link; cloned data remains reusable. */
+    fun clearForTarget(targetPackage: String) {
+        if (!RepoSelection.isSafePackageName(targetPackage)) return
+        File(reposDir, RepoSelection.bindingFileName(targetPackage)).delete()
+    }
+
     private fun persistSelection(request: RepoRequest, id: String, revision: String, targetPackage: String) {
         val json = JSONObject().put("url", request.url).put("ref", request.ref)
             .put("subfolder", request.subfolder).put("id", id).put("revision", revision)

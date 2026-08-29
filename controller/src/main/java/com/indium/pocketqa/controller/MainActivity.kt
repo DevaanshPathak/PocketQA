@@ -457,6 +457,19 @@ class MainActivity : Activity() {
                 }.start()
             }
             container.addView(btnClone)
+            container.addView(createSecondaryButton("USE VISUAL DIAGNOSIS (UNLINK REPO)") {
+                selectedTarget?.let { target ->
+                    RepoCloneManager(this).clearForTarget(target.packageName)
+                    repoCorpus = null
+                    repoUrl = ""
+                    repoRef = "main"
+                    repoSubfolder = ""
+                    repoStatus = "No repository linked — diagnosis will highlight screenshot evidence locally"
+                    annotatedScreenshotPath = null
+                    visualHighlightRequestedFor = null
+                    render(PocketQaSessionStore.snapshot())
+                }
+            })
             container.addView(createCodeBlock("Status: $repoStatus"))
         }
         contentContainer.addView(repoAccordion)
@@ -1187,7 +1200,17 @@ class MainActivity : Activity() {
     }
 
     private fun loadRepositoryFor(target: TestTarget) {
-        val result = RepoCloneManager(this).loadForTarget(target.packageName)
+        val manager = RepoCloneManager(this)
+        var result = manager.loadForTarget(target.packageName)
+        // Before the package split, QuickCart used the legacy package name.
+        // Discard that stale association so the mini demo can exercise visual-only diagnosis.
+        if (
+            target.packageName == PocketQaAccessibilityService.DEFAULT_TARGET_PACKAGE &&
+            result?.first?.subfolder == "bug_app/bugged"
+        ) {
+            manager.clearForTarget(target.packageName)
+            result = null
+        }
         if (result != null) {
             val (request, corpus) = result
             repoUrl = request.url
@@ -1196,11 +1219,16 @@ class MainActivity : Activity() {
             repoCorpus = corpus
             repoStatus = "Indexed ${corpus.chunks.size} chunks"
         } else {
-            repoUrl = ""
-            repoRef = "main"
-            repoSubfolder = ""
+            val default = TargetProfile.defaultRepositoryFor(target.packageName)
+            repoUrl = default?.url.orEmpty()
+            repoRef = default?.ref ?: "main"
+            repoSubfolder = default?.subfolder.orEmpty()
             repoCorpus = null
-            repoStatus = "No repository indexed"
+            repoStatus = if (default == null) {
+                "No repository linked — visual diagnosis available"
+            } else {
+                "QuickCart source pre-filled — clone & index for source-grounded patches"
+            }
         }
     }
 
