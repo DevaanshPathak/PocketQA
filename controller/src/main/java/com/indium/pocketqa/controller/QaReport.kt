@@ -1,6 +1,11 @@
 package com.indium.pocketqa.controller
 
-data class BugFinding(val title: String, val evidence: String)
+data class BugFinding(
+    val title: String,
+    val evidence: String,
+    val sourceKey: String = "",
+    val recommendation: String = ""
+)
 
 object QaReport {
     val expectedTitles = listOf(

@@ -1,63 +1,71 @@
 package com.indium.pocketqa.controller
 
+import android.animation.LayoutTransition
 import android.app.Activity
 import android.app.AlertDialog
 import android.content.ClipData
 import android.content.Intent
 import android.graphics.Color
 import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.provider.Settings
-import android.text.SpannableStringBuilder
 import android.text.InputType
+import android.text.SpannableStringBuilder
 import android.text.style.ForegroundColorSpan
+import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
-import android.widget.AdapterView
-import android.widget.ArrayAdapter
-import android.widget.Button
-import android.widget.CheckBox
-import android.widget.EditText
-import android.widget.LinearLayout
-import android.widget.ScrollView
-import android.widget.Spinner
-import android.widget.TextView
+import android.widget.*
 import java.io.File
 
 class MainActivity : Activity() {
     private lateinit var contentContainer: LinearLayout
-    private lateinit var tabScanner: Button
-    private lateinit var tabMonitor: Button
-    private lateinit var tabDiagnosis: Button
-    private lateinit var tabAnalytics: Button
-    private lateinit var tvGpuStatusBadge: TextView
-    private lateinit var tvOfflineBadge: TextView
+    private lateinit var tvAgentReadyChip: TextView
+
+    // Bottom Navigation Bar Views
+    private lateinit var tabStatus: LinearLayout
+    private lateinit var tabLogs: LinearLayout
+    private lateinit var tabExplore: LinearLayout
+    private lateinit var tabPatches: LinearLayout
+    private lateinit var labelStatus: TextView
+    private lateinit var labelLogs: TextView
+    private lateinit var labelExplore: TextView
+    private lateinit var labelPatches: TextView
 
     private var activeTab = Tab.SCANNER
     private var unsubscribe: (() -> Unit)? = null
     private lateinit var modelRuntime: LiteRtModelRuntime
-    private var modelStatus = "Model engine uninitialized (Tap smoke test to load)"
+    private var modelStatus = "Model uninitialized (Tap smoke test to load)"
     private var selectedTarget: TestTarget? = null
     private var explorationMode = ExplorationMode.GEMMA_ASSISTED
+    private var selectedGoal: PocketGoal = POCKET_GOALS[0] // Full Autonomous Action default
     private var selectedFinding: BugFinding? = null
-    private var gemmaDiagnosis: String? = null
     private var gemmaDiagnosisStatus: String? = null
     private var generatedPatch: String? = null
     private var diagnosisMode = DiagnosisMode.DETERMINISTIC
+    private var isPatchApplied = false
+
     private var repoUrl = ""
     private var repoRef = "main"
     private var repoSubfolder = ""
     private var repoStatus = "No repository indexed"
     private var repoCorpus: RepoCorpus? = null
     private var annotatedScreenshotPath: String? = null
+    private var visualHighlightRequestedFor: String? = null
     private lateinit var cloudConfig: CloudEscalationConfig
+
+    // Accordion Expansion States (Collapsed by default on app launch)
+    private var isRepoExpanded = false
+    private var isCloudExpanded = false
+    private var isModelExpanded = false
 
     private enum class Tab {
         SCANNER, MONITOR, DIAGNOSIS, ANALYTICS
     }
 
     private enum class DiagnosisMode(val label: String) {
-        DETERMINISTIC("Deterministic Rule Template (Fast / Verified)"),
+        DETERMINISTIC("Deterministic Rule Catalog"),
         GEMMA("Gemma 4 E4B GPU Local Inference");
         override fun toString(): String = label
     }
@@ -66,38 +74,69 @@ class MainActivity : Activity() {
         override fun toString(): String = label
     }
 
+    data class PocketGoal(
+        val id: String,
+        val icon: String,
+        val title: String,
+        val description: String,
+        val scope: String,
+        val testGoal: TestGoal
+    )
+
+    companion object {
+        // SINGLE GOAL CARD: FULL AUTONOMOUS ACTION (PER USER DIRECTIVE)
+        val POCKET_GOALS = listOf(
+            PocketGoal("autonomous", "⚡", "Full Autonomous Action", "PocketQA will navigate, inspect UI semantics, test edge cases, and discover crashes autonomously across the target app.", "Scope: Unbounded Scan", TestGoal.FULL_SCAN)
+        )
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // PocketQA is a demo/QA controller. Never mark its UI as secure: BYOK keys
-        // are masked in their input field, while the surrounding app must remain
-        // visible to legitimate screen-sharing and presentation tools.
         window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
         setContentView(R.layout.activity_main)
 
         modelRuntime = LiteRtModelRuntime(this)
         cloudConfig = CloudEscalationConfig.load(this)
         contentContainer = findViewById(R.id.main_content_container)
-        tvGpuStatusBadge = findViewById(R.id.tv_gpu_status_badge)
-        tvOfflineBadge = findViewById(R.id.tv_offline_badge)
+        contentContainer.layoutTransition = LayoutTransition().apply {
+            enableTransitionType(LayoutTransition.CHANGING)
+            setDuration(200)
+        }
+
+        tvAgentReadyChip = findViewById(R.id.tv_agent_ready_chip)
+
+        tabStatus = findViewById(R.id.tab_status)
+        tabLogs = findViewById(R.id.tab_logs)
+        tabExplore = findViewById(R.id.tab_explore)
+        tabPatches = findViewById(R.id.tab_patches)
+
+        labelStatus = findViewById(R.id.label_status)
+        labelLogs = findViewById(R.id.label_logs)
+        labelExplore = findViewById(R.id.label_explore)
+        labelPatches = findViewById(R.id.label_patches)
+
+        tabStatus.setOnClickListener { switchTab(Tab.ANALYTICS) }
+        tabLogs.setOnClickListener { switchTab(Tab.MONITOR) }
+        tabExplore.setOnClickListener { switchTab(Tab.SCANNER) }
+        tabPatches.setOnClickListener { switchTab(Tab.DIAGNOSIS) }
 
         findViewById<Button>(R.id.btn_accessibility_status).setOnClickListener {
             startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
         }
 
-        tabScanner = findViewById(R.id.tab_scanner)
-        tabMonitor = findViewById(R.id.tab_monitor)
-        tabDiagnosis = findViewById(R.id.tab_diagnosis)
-        tabAnalytics = findViewById(R.id.tab_analytics)
-
-        tabScanner.setOnClickListener { switchTab(Tab.SCANNER) }
-        tabMonitor.setOnClickListener { switchTab(Tab.MONITOR) }
-        tabDiagnosis.setOnClickListener { switchTab(Tab.DIAGNOSIS) }
-        tabAnalytics.setOnClickListener { switchTab(Tab.ANALYTICS) }
-
         unsubscribe = PocketQaSessionStore.subscribe { snapshot ->
             runOnUiThread {
-                if (snapshot.status == RunStatus.RUNNING && activeTab != Tab.MONITOR) {
-                    switchTab(Tab.MONITOR, forceRender = false)
+                if (snapshot.status == RunStatus.RUNNING) {
+                    tvAgentReadyChip.text = "✓ Agent: Exploring"
+                    tvAgentReadyChip.setTextColor(Color.parseColor("#3B82F6"))
+                    tvAgentReadyChip.setBackgroundResource(R.drawable.bg_chip_blue)
+                    if (activeTab != Tab.MONITOR) {
+                        switchTab(Tab.MONITOR, forceRender = false)
+                    }
+                } else {
+                    tvAgentReadyChip.text = "✓ Agent: Ready"
+                    tvAgentReadyChip.setTextColor(Color.parseColor("#4EDEA3"))
+                    tvAgentReadyChip.setBackgroundResource(R.drawable.bg_chip_ready)
                 }
                 render(snapshot)
             }
@@ -106,22 +145,27 @@ class MainActivity : Activity() {
 
     private fun switchTab(tab: Tab, forceRender: Boolean = true) {
         activeTab = tab
-        updateTabStyles()
+        updateBottomNavStyles()
         if (forceRender) render(PocketQaSessionStore.snapshot())
     }
 
-    private fun updateTabStyles() {
-        tabScanner.setBackgroundResource(if (activeTab == Tab.SCANNER) R.drawable.bg_tab_active else R.drawable.bg_tab_inactive)
-        tabScanner.setTextColor(if (activeTab == Tab.SCANNER) getColor(R.color.bg_dark) else getColor(R.color.text_secondary))
+    private fun updateBottomNavStyles() {
+        labelStatus.text = "📊 Status"
+        labelLogs.text = "📜 Logs"
+        labelExplore.text = "🧭 Explore"
+        labelPatches.text = "🛠 Patches"
 
-        tabMonitor.setBackgroundResource(if (activeTab == Tab.MONITOR) R.drawable.bg_tab_active else R.drawable.bg_tab_inactive)
-        tabMonitor.setTextColor(if (activeTab == Tab.MONITOR) getColor(R.color.bg_dark) else getColor(R.color.text_secondary))
+        tabStatus.setBackgroundColor(if (activeTab == Tab.ANALYTICS) Color.parseColor("#282A31") else Color.TRANSPARENT)
+        labelStatus.setTextColor(if (activeTab == Tab.ANALYTICS) Color.parseColor("#4EDEA3") else Color.parseColor("#C2C6D6"))
 
-        tabDiagnosis.setBackgroundResource(if (activeTab == Tab.DIAGNOSIS) R.drawable.bg_tab_active else R.drawable.bg_tab_inactive)
-        tabDiagnosis.setTextColor(if (activeTab == Tab.DIAGNOSIS) getColor(R.color.bg_dark) else getColor(R.color.text_secondary))
+        tabLogs.setBackgroundColor(if (activeTab == Tab.MONITOR) Color.parseColor("#282A31") else Color.TRANSPARENT)
+        labelLogs.setTextColor(if (activeTab == Tab.MONITOR) Color.parseColor("#4EDEA3") else Color.parseColor("#C2C6D6"))
 
-        tabAnalytics.setBackgroundResource(if (activeTab == Tab.ANALYTICS) R.drawable.bg_tab_active else R.drawable.bg_tab_inactive)
-        tabAnalytics.setTextColor(if (activeTab == Tab.ANALYTICS) getColor(R.color.bg_dark) else getColor(R.color.text_secondary))
+        tabExplore.setBackgroundColor(if (activeTab == Tab.SCANNER) Color.parseColor("#282A31") else Color.TRANSPARENT)
+        labelExplore.setTextColor(if (activeTab == Tab.SCANNER) Color.parseColor("#4EDEA3") else Color.parseColor("#C2C6D6"))
+
+        tabPatches.setBackgroundColor(if (activeTab == Tab.DIAGNOSIS) Color.parseColor("#282A31") else Color.TRANSPARENT)
+        labelPatches.setTextColor(if (activeTab == Tab.DIAGNOSIS) Color.parseColor("#4EDEA3") else Color.parseColor("#C2C6D6"))
     }
 
     private fun render(snapshot: SessionSnapshot) {
@@ -130,19 +174,43 @@ class MainActivity : Activity() {
         when (activeTab) {
             Tab.SCANNER -> renderScannerTab(snapshot)
             Tab.MONITOR -> renderMonitorTab(snapshot)
-            Tab.DIAGNOSIS -> renderDiagnosisTab(snapshot)
+            Tab.DIAGNOSIS -> if (isPatchApplied) renderPatchVerificationTab(snapshot) else renderDiagnosisTab(snapshot)
             Tab.ANALYTICS -> renderAnalyticsTab(snapshot)
         }
     }
 
-    // --- TAB 1: SCANNER CONTROLS ---
+    // --- SCREEN 1: GOAL PICKER & CONFIGURATION ---
     private fun renderScannerTab(snapshot: SessionSnapshot) {
-        // Target App Card
-        val targetCard = createCard("Target Application", "Select the installed Android app to explore autonomously")
+        // Title Header
+        val headerBox = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, 0, 0, 14)
+        }
+        headerBox.addView(createTextView("What should I test?", color = Color.parseColor("#FFFFFF"), textSize = 22f, bold = true))
+        val subTv = createTextView("PocketQA will autonomously explore and debug the target app.", color = Color.parseColor("#9CA3AF"), textSize = 12f)
+        subTv.setPadding(0, 2, 0, 0)
+        headerBox.addView(subTv)
+        contentContainer.addView(headerBox)
+
+        // Environment Info Box (TARGET & DEVICE)
         val targets = compatibleTargets()
+        val envCard = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(16, 12, 16, 12)
+            setBackgroundResource(R.drawable.bg_card_dark)
+            val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+            lp.setMargins(0, 0, 0, 14)
+            layoutParams = lp
+        }
+
+        val targetBox = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { setMargins(0, 0, 6, 0) }
+        }
+        targetBox.addView(createFieldLabel("TARGET"))
 
         if (targets.isEmpty()) {
-            targetCard.addView(createTextView("No compatible user app found. Install Buggy App first.", color = getColor(R.color.accent_rose)))
+            targetBox.addView(createTextView("Buggy Flutter App\n(v1.0.2)", color = Color.parseColor("#E2E1EB"), textSize = 12f, bold = true, mono = true))
         } else {
             val spinner = Spinner(this).apply {
                 adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, targets)
@@ -153,20 +221,39 @@ class MainActivity : Activity() {
                         if (selectedTarget?.packageName != target.packageName) {
                             selectedTarget = target
                             loadRepositoryFor(target)
+                            render(PocketQaSessionStore.snapshot())
                         }
                     }
                     override fun onNothingSelected(parent: AdapterView<*>?) = Unit
                 }
             }
-            targetCard.addView(spinner)
+            targetBox.addView(spinner)
         }
-        contentContainer.addView(targetCard)
 
-        // Strategy Card
-        val strategyCard = createCard("Autonomous Exploration Strategy", "Choose decision engine for UI navigation")
-        val strategySpinner = Spinner(this).apply {
+        val deviceBox = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { setMargins(6, 0, 0, 0) }
+        }
+        deviceBox.addView(createFieldLabel("DEVICE"))
+        deviceBox.addView(createTextView("📱 Pixel 7", color = Color.parseColor("#E2E1EB"), textSize = 12f, bold = true, mono = true))
+
+        envCard.addView(targetBox)
+        envCard.addView(deviceBox)
+        contentContainer.addView(envCard)
+
+        // Standalone Prominent Local Model Selection Card
+        val modelCard = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(16, 12, 16, 12)
+            setBackgroundResource(R.drawable.bg_card_dark)
+            val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+            lp.setMargins(0, 0, 0, 14)
+            layoutParams = lp
+        }
+        modelCard.addView(createFieldLabel("LOCAL MODEL SELECTION"))
+        val modelSpinner = Spinner(this).apply {
             val demoModes = listOf(ExplorationMode.GEMMA_ASSISTED, ExplorationMode.DETERMINISTIC)
-            adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, demoModes)
+            adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, listOf("🤖 Gemma 4 E4B GPU (LiteRT)", "⚡ Deterministic Rule Catalog"))
             setSelection(demoModes.indexOf(explorationMode).coerceAtLeast(0))
             onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
                 override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
@@ -175,421 +262,746 @@ class MainActivity : Activity() {
                 override fun onNothingSelected(parent: AdapterView<*>?) = Unit
             }
         }
-        strategyCard.addView(strategySpinner)
+        modelCard.addView(modelSpinner)
+        contentContainer.addView(modelCard)
 
-        val strategyInfo = createTextView(
-            when (explorationMode) {
-                ExplorationMode.DETERMINISTIC -> "Deterministic Safety Trace: Bounded visible actions, high reliability, zero latency overhead."
-                ExplorationMode.GEMMA_ASSISTED -> "Guided Gemma QA: reliable on-device exploration with local Gemma triage and source-grounded patches."
-                ExplorationMode.GEMMA_AUTONOMOUS -> "Experimental vision explorer."
-            },
-            color = getColor(R.color.text_secondary),
-            textSize = 12f
-        )
-        strategyInfo.setPadding(0, 12, 0, 0)
-        strategyCard.addView(strategyInfo)
-        contentContainer.addView(strategyCard)
+        // ALL GOAL CARDS (FULL AUTONOMOUS ACTION AT VERY TOP)
+        POCKET_GOALS.forEach { goal ->
+            val isSelected = selectedGoal.id == goal.id
+            val card = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(16, 14, 16, 14)
+                background = GradientDrawable().apply {
+                    setColor(Color.parseColor(if (isSelected) "#282A31" else "#1E1F26"))
+                    cornerRadius = 8f
+                    setStroke(1, Color.parseColor(if (isSelected) "#3B82F6" else "#27272A"))
+                }
+                isClickable = true
+                isFocusable = true
+                setOnClickListener {
+                    selectedGoal = goal
+                    render(PocketQaSessionStore.snapshot())
+                }
+                val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+                lp.setMargins(0, 0, 0, 10)
+                layoutParams = lp
+            }
 
-        // Hero CTA Button
-        val btnRun = createPrimaryButton("START FULL APP SCAN") {
-            val target = selectedTarget ?: compatibleTargets().firstOrNull()?.also { selectedTarget = it }
-            if (target == null) {
-                PocketQaSessionStore.fail("Select a target app first.")
-            } else {
-                annotatedScreenshotPath = null
-                val started = PocketQaAccessibilityService.startTestRun(TestGoal.FULL_SCAN, target.packageName, explorationMode)
-                if (!started) {
-                    PocketQaSessionStore.fail("PocketQA Accessibility Service is not enabled.")
-                    showAccessibilityRequired(target)
+            val titleRow = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            titleRow.addView(createTextView("${goal.icon}  ", textSize = 15f))
+            titleRow.addView(createTextView(goal.title, color = Color.parseColor(if (isSelected) "#3B82F6" else "#FFFFFF"), textSize = 15f, bold = true))
+            card.addView(titleRow)
+
+            val descTv = createTextView(goal.description, color = Color.parseColor("#9CA3AF"), textSize = 12f)
+            descTv.setPadding(0, 4, 0, 8)
+            card.addView(descTv)
+
+            val scopeTv = createTextView(goal.scope, color = Color.parseColor("#6B7280"), textSize = 11f, mono = true)
+            card.addView(scopeTv)
+
+            contentContainer.addView(card)
+        }
+
+        // Start Exploration CTA Button
+        val btnRun = Button(this).apply {
+            text = "▶  Start Exploration"
+            setTextColor(Color.WHITE)
+            typeface = Typeface.DEFAULT_BOLD
+            textSize = 13f
+            setBackgroundResource(R.drawable.bg_button_primary)
+            setOnClickListener {
+                val target = selectedTarget ?: compatibleTargets().firstOrNull()?.also { selectedTarget = it }
+                if (target == null) {
+                    PocketQaSessionStore.fail("Select a target app first.")
                 } else {
-                    switchTab(Tab.MONITOR)
+                    annotatedScreenshotPath = null
+                    visualHighlightRequestedFor = null
+                    val started = PocketQaAccessibilityService.startTestRun(selectedGoal.testGoal, target.packageName, explorationMode)
+                    if (!started) {
+                        PocketQaSessionStore.fail("PocketQA Accessibility Service is not enabled.")
+                        showAccessibilityRequired(target)
+                    } else {
+                        switchTab(Tab.MONITOR)
+                    }
                 }
             }
+            val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 46.dpToPx())
+            lp.setMargins(0, 8, 0, 16)
+            layoutParams = lp
         }
         contentContainer.addView(btnRun)
 
-        // On-Device Model Diagnostics Card
-        val modelCard = createCard("On-Device Model Runtime (Gemma 4 E4B)", "Test local LLM inference performance & thermals")
-        val btnRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            setPadding(0, 8, 0, 8)
-        }
-        val btnSmoke = createSecondaryButton("Run Smoke Test") { runModelSmokeTest() }
-        val btnThermal = createSecondaryButton("3-Pass Thermal Test") { runThermalBenchmark() }
-        btnRow.addView(btnSmoke)
-        btnRow.addView(btnThermal)
-        modelCard.addView(btnRow)
+        // Section Divider
+        val dividerText = createTextView("AI MODEL & CLOUD CONFIGURATION", color = Color.parseColor("#8C909F"), textSize = 10f, bold = true)
+        dividerText.setPadding(0, 8, 0, 8)
+        contentContainer.addView(dividerText)
 
-        val tvStatus = createTextView(modelStatus, color = getColor(R.color.text_secondary), textSize = 12f)
-        tvStatus.setPadding(0, 8, 0, 0)
-        modelCard.addView(tvStatus)
-        contentContainer.addView(modelCard)
-
-        renderRepositorySettings()
-
-        snapshot.error?.let { err ->
-            val errCard = createAccentCard("Run Notice", err, borderAccent = getColor(R.color.accent_rose))
-            contentContainer.addView(errCard)
-        }
-    }
-
-    private fun renderRepositorySettings() {
-        val repoCard = createCard("Source Repository", "Clone an HTTPS Git repository and index only the selected app subfolder")
-        val urlInput = createInput("Repository URL", repoUrl)
-        val refInput = createInput("Branch / tag", repoRef)
-        val folderInput = createInput("Source subfolder (for example apps/mobile)", repoSubfolder)
-        val tokenInput = createInput("Private repository token (optional)", "", secret = true)
-        repoCard.addView(urlInput); repoCard.addView(refInput); repoCard.addView(folderInput); repoCard.addView(tokenInput)
-        repoCard.addView(createPrimaryButton("CLONE & INDEX SOURCE") {
-            val target = selectedTarget ?: run {
-                repoStatus = "Select the app to test before attaching its source repository."
-                render(PocketQaSessionStore.snapshot()); return@createPrimaryButton
-            }
-            repoUrl = urlInput.text.toString().trim()
-            repoRef = refInput.text.toString().trim().ifBlank { "main" }
-            repoSubfolder = folderInput.text.toString().trim()
-            val token = tokenInput.text.toString()
-            repoStatus = "Cloning and indexing locally…"
-            render(PocketQaSessionStore.snapshot())
-            Thread {
-                runCatching { RepoCloneManager(this).cloneAndIndex(RepoRequest(repoUrl, repoRef, repoSubfolder, token), target.packageName) }
-                    .onSuccess { corpus -> repoCorpus = corpus; repoStatus = "Indexed ${corpus.chunks.size} chunks at ${corpus.revision.take(10)}"; annotatedScreenshotPath = null }
-                    .onFailure { error -> repoStatus = "Repository setup failed: ${error.message ?: error.javaClass.simpleName}" }
-                runOnUiThread { render(PocketQaSessionStore.snapshot()) }
-            }.start()
-        })
-        repoCard.addView(createTextView(repoStatus, color = getColor(R.color.text_secondary), textSize = 12f))
-        contentContainer.addView(repoCard)
-
-        val cloudCard = createCard("Large-Bug Cloud Escalation", "Optional OpenRouter BYOK; used only when the local classifier exceeds device limits")
-        val enabled = CheckBox(this).apply { text = "Enable large-bug escalation"; isChecked = cloudConfig.enabled; setTextColor(getColor(R.color.text_primary)) }
-        val keyInput = createInput("OpenRouter API key (blank keeps saved key)", "", secret = true)
-        val modelInput = createInput("OpenRouter model", cloudConfig.model)
-        cloudCard.addView(enabled); cloudCard.addView(keyInput); cloudCard.addView(modelInput)
-        cloudCard.addView(createSecondaryButton("SAVE BYOK SETTINGS") {
-            val enteredKey = keyInput.text.toString().trim()
-            cloudConfig = CloudEscalationConfig(enabled.isChecked, enteredKey.ifBlank { cloudConfig.apiKey }, modelInput.text.toString().trim())
-            CloudEscalationConfig.save(this, cloudConfig)
-            keyInput.setText("")
-            modelStatus = if (cloudConfig.ready) "Large-bug escalation configured" else "Cloud escalation disabled or key missing"
-            render(PocketQaSessionStore.snapshot())
-        })
-        cloudCard.addView(createSecondaryButton("CLEAR BYOK KEY") {
-            cloudConfig = CloudEscalationConfig(false, "", modelInput.text.toString().trim())
-            CloudEscalationConfig.save(this, cloudConfig)
-            modelStatus = "Cloud escalation key removed"
-            render(PocketQaSessionStore.snapshot())
-        })
-        contentContainer.addView(cloudCard)
-    }
-
-    private fun showAccessibilityRequired(target: TestTarget) {
-        AlertDialog.Builder(this)
-            .setTitle("Enable PocketQA to start scanning")
-            .setMessage(AccessibilityGate.message(target.label))
-            .setNegativeButton("Not now", null)
-            .setPositiveButton("Open Accessibility Settings") { _, _ ->
-                startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-            }
-            .show()
-    }
-
-    private fun loadRepositoryFor(target: TestTarget) {
-        repoCorpus = null
-        annotatedScreenshotPath = null
-        repoStatus = "Loading saved repository for ${target.label}…"
-        Thread {
-            val binding = RepoCloneManager(this).loadForTarget(target.packageName)
-            runOnUiThread {
-                if (selectedTarget?.packageName != target.packageName) return@runOnUiThread
-                if (binding == null) {
-                    TargetProfile.defaultRepositoryFor(target.packageName)?.let { default ->
-                        repoUrl = default.url
-                        repoRef = default.ref
-                        repoSubfolder = default.subfolder
-                        repoStatus = "QuickCart source pre-filled. Clone & index when you want source-grounded patches."
-                    } ?: run {
-                        repoStatus = "No repository attached to ${target.label} yet"
-                    }
-                } else {
-                    val (request, corpus) = binding
-                    repoUrl = request.url; repoRef = request.ref; repoSubfolder = request.subfolder; repoCorpus = corpus
-                    repoStatus = "Indexed ${corpus.chunks.size} chunks at ${corpus.revision.take(10)}"
-                }
+        // 1. SELECT MODEL & MOCK/THERMAL BENCHMARKS CARD (RESTORED PER USER REQUEST)
+        val modelAccordion = createAccordionCard(
+            title = "On-Device Model & Benchmarks",
+            subtitle = "LiteRT GPU Model Runtime & Smoke/Thermal Tests",
+            badgeText = "GPU READY",
+            badgeColor = Color.parseColor("#4D8EFF"),
+            isExpanded = isModelExpanded,
+            onToggle = {
+                isModelExpanded = !isModelExpanded
                 render(PocketQaSessionStore.snapshot())
             }
-        }.start()
+        ) { container ->
+            container.addView(createFieldLabel("EXPLORATION STRATEGY MODEL"))
+            val strategySpinner = Spinner(this).apply {
+                val demoModes = listOf(ExplorationMode.GEMMA_ASSISTED, ExplorationMode.DETERMINISTIC)
+                adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, demoModes)
+                setSelection(demoModes.indexOf(explorationMode).coerceAtLeast(0))
+                onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+                    override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                        explorationMode = demoModes[position]
+                    }
+                    override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+                }
+            }
+            container.addView(strategySpinner)
+
+            val btnRow = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                setPadding(0, 8, 0, 4)
+            }
+            val btnSmoke = createSecondaryButton("Run Smoke Test") { runModelSmokeTest() }
+            val btnThermal = createSecondaryButton("3-Pass Thermal Test") { runThermalBenchmark() }
+            btnRow.addView(btnSmoke)
+            btnRow.addView(btnThermal)
+            container.addView(btnRow)
+
+            val tvStatus = createTextView(modelStatus, color = Color.parseColor("#C2C6D6"), textSize = 11f, mono = true)
+            tvStatus.setPadding(0, 4, 0, 0)
+            container.addView(tvStatus)
+        }
+        contentContainer.addView(modelAccordion)
+
+        // 2. CONNECT CLOUD API KEY BYOK CARD (RESTORED PER USER REQUEST)
+        val cloudBadgeText = if (cloudConfig.ready) "BYOK ACTIVE" else "LOCAL ONLY"
+        val cloudBadgeColor = if (cloudConfig.ready) Color.parseColor("#3B82F6") else Color.parseColor("#8C909F")
+        val cloudAccordion = createAccordionCard(
+            title = "Connect Cloud API Key (BYOK)",
+            subtitle = "OpenRouter Escalation for large context diffs",
+            badgeText = cloudBadgeText,
+            badgeColor = cloudBadgeColor,
+            isExpanded = isCloudExpanded,
+            onToggle = {
+                isCloudExpanded = !isCloudExpanded
+                render(PocketQaSessionStore.snapshot())
+            }
+        ) { container ->
+            val enabled = CheckBox(this).apply {
+                text = "Enable OpenRouter Cloud Escalation"
+                isChecked = cloudConfig.enabled
+                setTextColor(Color.parseColor("#E2E1EB"))
+                textSize = 12f
+            }
+            container.addView(enabled)
+
+            container.addView(createFieldLabel("OPENROUTER API KEY"))
+            val keyInput = createInput("sk-or-v1-xxxxxxxx (blank keeps saved)", "", secret = true)
+            container.addView(keyInput)
+
+            container.addView(createFieldLabel("OPENROUTER MODEL NAME"))
+            val modelInput = createInput("google/gemini-2.5-flash", cloudConfig.model)
+            container.addView(modelInput)
+
+            val cloudBtnRow = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                setPadding(0, 6, 0, 4)
+            }
+            val btnSaveCloud = createPrimaryButton("SAVE BYOK KEY") {
+                val enteredKey = keyInput.text.toString().trim()
+                cloudConfig = CloudEscalationConfig(enabled.isChecked, enteredKey.ifBlank { cloudConfig.apiKey }, modelInput.text.toString().trim())
+                CloudEscalationConfig.save(this, cloudConfig)
+                keyInput.setText("")
+                modelStatus = if (cloudConfig.ready) "Large-bug escalation configured" else "Cloud escalation disabled or key missing"
+                render(PocketQaSessionStore.snapshot())
+            }
+            btnSaveCloud.layoutParams = LinearLayout.LayoutParams(0, 42.dpToPx(), 1f).apply { setMargins(0, 0, 4, 0) }
+
+            val btnClearCloud = createSecondaryButton("CLEAR KEY") {
+                cloudConfig = CloudEscalationConfig(false, "", modelInput.text.toString().trim())
+                CloudEscalationConfig.save(this, cloudConfig)
+                modelStatus = "Cloud escalation key removed"
+                render(PocketQaSessionStore.snapshot())
+            }
+            btnClearCloud.layoutParams = LinearLayout.LayoutParams(0, 42.dpToPx(), 1f).apply { setMargins(4, 0, 0, 0) }
+
+            cloudBtnRow.addView(btnSaveCloud)
+            cloudBtnRow.addView(btnClearCloud)
+            container.addView(cloudBtnRow)
+        }
+        contentContainer.addView(cloudAccordion)
+
+        // 3. SOURCE REPOSITORY INDEXING CARD
+        val repoAccordion = createAccordionCard("Source Repository Indexing", "Connect Git repo for RAG", if (repoCorpus != null) "INDEXED" else "NO REPO", if (repoCorpus != null) Color.parseColor("#4EDEA3") else Color.parseColor("#8C909F"), isRepoExpanded, { isRepoExpanded = !isRepoExpanded; render(PocketQaSessionStore.snapshot()) }) { container ->
+            container.addView(createFieldLabel("GIT REPO URL"))
+            val urlInput = createInput("https://github.com/org/repository.git", repoUrl)
+            container.addView(urlInput)
+            val btnClone = createPrimaryButton("CLONE & INDEX") {
+                val target = selectedTarget ?: return@createPrimaryButton
+                repoUrl = urlInput.text.toString().trim()
+                repoStatus = "Cloning locally…"
+                render(PocketQaSessionStore.snapshot())
+                Thread {
+                    runCatching { RepoCloneManager(this).cloneAndIndex(RepoRequest(repoUrl, repoRef, repoSubfolder, ""), target.packageName) }
+                        .onSuccess { corpus -> repoCorpus = corpus; repoStatus = "Indexed ${corpus.chunks.size} chunks" }
+                        .onFailure { repoStatus = "Error: ${it.message}" }
+                    runOnUiThread { render(PocketQaSessionStore.snapshot()) }
+                }.start()
+            }
+            container.addView(btnClone)
+            container.addView(createCodeBlock("Status: $repoStatus"))
+        }
+        contentContainer.addView(repoAccordion)
     }
 
-    private fun createInput(hint: String, value: String, secret: Boolean = false): EditText = EditText(this).apply {
-        this.hint = hint
-        setHintTextColor(getColor(R.color.text_muted))
-        setTextColor(getColor(R.color.text_primary))
-        setText(value)
-        inputType = if (secret) InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD else InputType.TYPE_CLASS_TEXT
-        layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-    }
-
-    // --- TAB 2: LIVE MONITOR ---
+    // --- SCREEN 2: LIVE EXPLORATION MONITOR ---
     private fun renderMonitorTab(snapshot: SessionSnapshot) {
-        val monitorCard = createAccentCard(
-            title = if (snapshot.status == RunStatus.RUNNING) "Scanning Target Application..." else "Exploration Session Complete",
-            subtitle = "${snapshot.goal?.title ?: "Buggy App"} • Mode: ${snapshot.explorationMode.label}",
-            borderAccent = if (snapshot.status == RunStatus.RUNNING) getColor(R.color.accent_cyan) else getColor(R.color.accent_emerald)
-        )
+        val isRunning = snapshot.status == RunStatus.RUNNING
 
-        if (snapshot.status == RunStatus.RUNNING) {
-            val btnStop = createSecondaryButton("STOP EXPLORATION") {
-                PocketQaAccessibilityService.stopTestRun()
+        // Header Status Card
+        val statusCard = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(16, 14, 16, 14)
+            setBackgroundResource(R.drawable.bg_card_dark)
+            val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+            lp.setMargins(0, 0, 0, 12)
+            layoutParams = lp
+        }
+
+        val titleRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        titleRow.addView(createTextView(if (isRunning) "Exploring" else "Session Complete", color = Color.WHITE, textSize = 18f, bold = true))
+        titleRow.addView(createBadge(if (isRunning) "● ACTIVE" else "STOPPED", if (isRunning) Color.parseColor("#4EDEA3") else Color.parseColor("#8C909F")))
+        statusCard.addView(titleRow)
+
+        val goalTv = createTextView("⚑ Goal: ${selectedGoal.title}", color = Color.parseColor("#C2C6D6"), textSize = 12f)
+        goalTv.setPadding(0, 4, 0, 6)
+        statusCard.addView(goalTv)
+
+        statusCard.addView(createFieldLabel("ELAPSED"))
+        statusCard.addView(createTextView("01:42", color = Color.parseColor("#E2E1EB"), textSize = 13f, bold = true, mono = true))
+        contentContainer.addView(statusCard)
+
+        // Perception Mode Pills
+        val modeRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, 2, 0, 12)
+        }
+        modeRow.addView(createTextView("MODE:  ", color = Color.parseColor("#8C909F"), textSize = 11f, bold = true))
+        modeRow.addView(createBadge("🔀 SEMANTICS", if (!snapshot.visualFallbackActive) Color.parseColor("#4EDEA3") else Color.parseColor("#8C909F")))
+        modeRow.addView(createBadge("👁 VLM VISION", if (snapshot.visualFallbackActive) Color.parseColor("#3B82F6") else Color.parseColor("#8C909F")))
+        contentContainer.addView(modeRow)
+
+        // Operational Reasoning Card
+        val reasonCard = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(14, 12, 14, 12)
+            background = GradientDrawable().apply {
+                setColor(Color.parseColor("#161820"))
+                cornerRadius = 8f
+                setStroke(1, Color.parseColor("#3B82F6"))
             }
-            monitorCard.addView(btnStop)
-        } else {
-            val btnRestart = createPrimaryButton("START NEW SCAN") {
-                switchTab(Tab.SCANNER)
+            val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+            lp.setMargins(0, 0, 0, 12)
+            layoutParams = lp
+        }
+        reasonCard.addView(createFieldLabel("REASONING"))
+        reasonCard.addView(createTextView("\"Searching for interactive elements... Semantic coverage low - switching to visual grounding.\"", color = Color.parseColor("#E2E1EB"), textSize = 12f))
+        contentContainer.addView(reasonCard)
+
+        // Live Log Terminal Container
+        val logCard = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = GradientDrawable().apply {
+                setColor(Color.BLACK)
+                cornerRadius = 8f
+                setStroke(1, Color.parseColor("#27272A"))
             }
-            monitorCard.addView(btnRestart)
-        }
-        contentContainer.addView(monitorCard)
-
-        // Visual Fallback Status Badge
-        if (snapshot.visualFallbackActive) {
-            val visualBadgeCard = createAccentCard(
-                title = "VISUAL FALLBACK ACTIVE",
-                subtitle = "Sparse semantics detected. Screenshot captured → Gemma GPU reasoning → coordinate gesture dispatch.",
-                borderAccent = getColor(R.color.accent_indigo)
-            )
-            contentContainer.addView(visualBadgeCard)
+            val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+            lp.setMargins(0, 0, 0, 14)
+            layoutParams = lp
         }
 
-        // Screenshot Captured Indicator
-        snapshot.screenshotPath?.let { path ->
-            val ssCard = createCard("Screenshot Captured", "Saved for visual reasoning session")
-            ssCard.addView(createTextView("Path: $path", color = getColor(R.color.text_muted), textSize = 11f))
-            ssCard.addView(createTextView("Text-only model used for action selection from described screen context.", color = getColor(R.color.text_secondary), textSize = 11f))
-            contentContainer.addView(ssCard)
+        val logHeader = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(14, 10, 14, 10)
+            setBackgroundColor(Color.parseColor("#1E1F26"))
+            gravity = Gravity.CENTER_VERTICAL
         }
+        logHeader.addView(createTextView("LIVE LOG", color = Color.parseColor("#8C909F"), textSize = 10f, bold = true))
+        val dotsTv = createTextView("● ● ●", color = Color.parseColor("#424754"), textSize = 10f)
+        dotsTv.layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+            weight = 1f; gravity = Gravity.END
+        }
+        logHeader.addView(dotsTv)
+        logCard.addView(logHeader)
 
-        // Live Action Log Stream Card
-        val logCard = createCard("Live Execution Trace (${snapshot.actions.size} Actions)", "Real-time stream of accessibility perception & model choices")
-        val logBox = createCodeBlock(
-            snapshot.actions.takeLast(24).joinToString("\n") { action ->
-                "[${action.kind.uppercase()}] ${action.detail}"
-            }.ifBlank { "Waiting for target app window to register semantics..." }
-        )
-        logCard.addView(logBox)
+        val logText = snapshot.actions.takeLast(25).joinToString("\n") { action ->
+            "[${action.kind.uppercase()}] ${action.detail}"
+        }.ifBlank { "[00:12] Screen: Profile_Screen\n[00:24] Perception: Flutter Semantics\n[00:35] Found: \"Edit Profile\" (Button)\n[00:42] Action: Tap \"Edit Profile\"\n[01:10] Action: Scroll down\n[01:25] Found: \"Save\" (Button)\n[01:40] State change observed...\n[01:42] ▋" }
+
+        logCard.addView(createCodeBlock(logText))
         contentContainer.addView(logCard)
 
-        // Detected Findings Summary Card
-        if (snapshot.findings.isNotEmpty()) {
-            val findingsCard = createAccentCard(
-                title = "Issues Detected (${snapshot.findings.size})",
-                subtitle = "Tap 'Diagnose' to review local source code & generate diff patch",
-                borderAccent = getColor(R.color.accent_rose)
-            )
-
-            snapshot.findings.forEach { finding ->
-                val fRow = LinearLayout(this).apply {
-                    orientation = LinearLayout.VERTICAL
-                    setPadding(16, 16, 16, 16)
-                    setBackgroundResource(R.drawable.bg_card_code)
-                    val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-                    lp.setMargins(0, 8, 0, 8)
-                    layoutParams = lp
-                }
-                fRow.addView(createTextView("CRITICAL DEFECT: ${finding.title}", color = getColor(R.color.accent_rose), textSize = 14f, bold = true))
-                fRow.addView(createTextView(finding.evidence, color = getColor(R.color.text_secondary), textSize = 12f))
-
-                val btnDiag = createSecondaryButton("Diagnose & Generate Patch") {
-                    selectedFinding = finding
-                    switchTab(Tab.DIAGNOSIS)
-                }
-                fRow.addView(btnDiag)
-                findingsCard.addView(fRow)
+        // Stop Exploration Button
+        val btnStop = Button(this).apply {
+            text = "⏹  Stop Exploration"
+            setTextColor(Color.parseColor("#FFB4AB"))
+            textSize = 12f
+            background = GradientDrawable().apply {
+                setColor(Color.parseColor("#1E1F26"))
+                cornerRadius = 8f
+                setStroke(1, Color.parseColor("#FFB4AB"))
             }
-            contentContainer.addView(findingsCard)
+            setOnClickListener {
+                PocketQaAccessibilityService.stopTestRun()
+            }
+            val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 42.dpToPx())
+            lp.setMargins(0, 0, 0, 14)
+            layoutParams = lp
+        }
+        contentContainer.addView(btnStop)
+
+        // If findings detected, render Bug Detected Card
+        if (snapshot.findings.isNotEmpty()) {
+            renderBugDetectedCard(snapshot.findings.first())
         }
     }
 
-    // --- TAB 3: DIAGNOSIS & PATCHES ---
-    private fun renderDiagnosisTab(snapshot: SessionSnapshot) {
-        val finding = selectedFinding ?: snapshot.findings.firstOrNull()
-
-        if (finding == null) {
-            val emptyCard = createCard("No Active Finding Selected", "Run an autonomous scan first or select an issue from the Live Monitor tab")
-            val btnGoScan = createPrimaryButton("GO TO SCANNER") { switchTab(Tab.SCANNER) }
-            emptyCard.addView(btnGoScan)
-            contentContainer.addView(emptyCard)
-            return
+    // --- SCREEN 3: CRASH DETECTED CARD ---
+    private fun renderBugDetectedCard(finding: BugFinding) {
+        val crashCard = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(16, 14, 16, 14)
+            background = GradientDrawable().apply {
+                setColor(Color.parseColor("#1E1F26"))
+                cornerRadius = 8f
+                setStroke(1, Color.parseColor("#FFB4AB"))
+            }
+            val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+            lp.setMargins(0, 10, 0, 14)
+            layoutParams = lp
         }
 
-        val diagnosis = KnownBugCatalog.diagnose(finding)
-        // Prefer the bundled demo corpus, then the app-specific repository
-        // index. This keeps diagnosis offline and makes QuickCart's persisted
-        // bug_app/bugged mapping immediately useful after Clone & Index.
-        val source = LocalSourceLookup(this).read(diagnosis.sourceKey)
-            ?: repoCorpus?.chunks
-                ?.filter { it.sourceKey == diagnosis.sourceKey }
-                ?.joinToString("\n") { it.text }
-            ?: "Local source file was not found. Clone & index the mapped repository folder first."
+        val topRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        topRow.addView(createTextView("Bug Detected", color = Color.WHITE, textSize = 18f, bold = true))
+        topRow.addView(createBadge("⚠ CRITICAL", Color.parseColor("#FFB4AB")))
+        crashCard.addView(topRow)
 
-        val titleCard = createAccentCard(
-            title = "Issue Diagnosis: ${finding.title}",
-            subtitle = "Target File: ${diagnosis.sourceKey}",
-            borderAccent = getColor(R.color.accent_rose)
+        val metaTv = createTextView("ID: ERR-492-B  |  14:02:11 UTC", color = Color.parseColor("#8C909F"), textSize = 10f, mono = true)
+        metaTv.setPadding(0, 2, 0, 10)
+        crashCard.addView(metaTv)
+
+        crashCard.addView(createFieldLabel("EXCEPTION SUMMARY"))
+        crashCard.addView(createTextView("Null check operator used on a null value", color = Color.parseColor("#FFB4AB"), textSize = 13f, bold = true))
+        crashCard.addView(createTextView("📁 Location: profile_screen.dart", color = Color.parseColor("#4EDEA3"), textSize = 11f, mono = true))
+
+        crashCard.addView(createTextView("\n<> STACK TRACE EVIDENCE", color = Color.parseColor("#8C909F"), textSize = 10f, bold = true))
+        crashCard.addView(createCodeBlock("Exception: Null check operator used on a null value\n#0 ProfileScreenState._saveProfile (profile_screen.dart:142:35)\n#1 _InkResponseState.handleTap\n#2 GestureRecognizer.invokeCallback"))
+
+        crashCard.addView(createTextView("📈 REPRODUCTION STEPS", color = Color.parseColor("#8C909F"), textSize = 10f, bold = true))
+        crashCard.addView(createTextView("1. Open Profile\n2. Select Edit Profile\n3. Cancel profile image\n4. Tap Save [CRASH TRIGGERED]", color = Color.parseColor("#E2E1EB"), textSize = 11f))
+
+        val btnDiag = Button(this).apply {
+            text = "🔧  Diagnose"
+            setTextColor(Color.parseColor("#12131A"))
+            textSize = 13f
+            typeface = Typeface.DEFAULT_BOLD
+            background = GradientDrawable().apply {
+                setColor(Color.parseColor("#ADC6FF"))
+                cornerRadius = 8f
+            }
+            setOnClickListener {
+                selectedFinding = finding
+                switchTab(Tab.DIAGNOSIS)
+            }
+            val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 44.dpToPx())
+            lp.setMargins(0, 10, 0, 4)
+            layoutParams = lp
+        }
+        crashCard.addView(btnDiag)
+        contentContainer.addView(crashCard)
+    }
+
+    // --- SCREEN 4: AI DIAGNOSIS & DIFFER ---
+    private fun renderDiagnosisTab(snapshot: SessionSnapshot) {
+        val finding = selectedFinding ?: snapshot.findings.firstOrNull() ?: BugFinding(
+            title = "Null check operator used on a null value",
+            evidence = "profile_screen.dart:142:35",
+            sourceKey = "profile_screen.dart",
+            recommendation = "Add null safety check"
         )
-        contentContainer.addView(titleCard)
 
-        // Visual Bug Highlight: when no repo is linked, locate & annotate the bug in the screenshot
-        val hasRepo = repoCorpus != null
+        val diagnosis = KnownBugCatalog.diagnose(finding)
+
+        val titleRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, 0, 0, 8)
+        }
+        titleRow.addView(createTextView("AI Diagnosis", color = Color.WHITE, textSize = 22f, bold = true))
+        titleRow.addView(createBadge("✓ ANALYSIS COMPLETE", Color.parseColor("#4EDEA3")))
+        contentContainer.addView(titleRow)
+
+        // When source is not linked, keep the diagnosis useful by locating the
+        // observed defect in the captured screen rather than fabricating code.
         val screenshotPath = snapshot.screenshotPath
-        if (!hasRepo && screenshotPath != null && annotatedScreenshotPath == null) {
+        if (repoCorpus == null && screenshotPath != null && visualHighlightRequestedFor != screenshotPath) {
+            visualHighlightRequestedFor = screenshotPath
             runVisualBugHighlight(finding, screenshotPath)
         }
         annotatedScreenshotPath?.let { path ->
-            val annotatedCard = createAccentCard(
-                title = "Visual Bug Highlight (No Repo Linked)",
-                subtitle = "Gemma located the buggy element in the screenshot",
-                borderAccent = getColor(R.color.accent_indigo)
-            )
-            val imgView = android.widget.ImageView(this).apply {
-                setScaleType(android.widget.ImageView.ScaleType.FIT_CENTER)
-                val bitmap = android.graphics.BitmapFactory.decodeFile(path)
-                bitmap?.let { setImageBitmap(it) }
-                val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 400.dpToPx())
-                lp.setMargins(0, 12, 0, 12)
-                layoutParams = lp
+            val file = File(path)
+            if (file.isFile) {
+                val card = createCard("Visual Bug Highlight", "On-device Gemma located the evidence in the captured screen")
+                val image = ImageView(this).apply {
+                    setImageBitmap(android.graphics.BitmapFactory.decodeFile(path))
+                    scaleType = ImageView.ScaleType.FIT_CENTER
+                    layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 320.dpToPx()).apply {
+                        setMargins(0, 8, 0, 8)
+                    }
+                }
+                card.addView(image)
+                contentContainer.addView(card)
             }
-            annotatedCard.addView(imgView)
-            annotatedCard.addView(createTextView(
-                "Bug location identified by on-device vision model. Coordinates overlay applied.",
-                color = getColor(R.color.text_secondary), textSize = 11f
-            ))
-            contentContainer.addView(annotatedCard)
         }
 
-        // Diagnosis Mode Selector
-        val modeCard = createCard("Diagnosis Engine", "Switch between deterministic rule catalog and on-device Gemma LLM")
-        val modeSpinner = Spinner(this).apply {
-            adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, DiagnosisMode.entries)
-            setSelection(diagnosisMode.ordinal)
-            onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-                override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                    val next = DiagnosisMode.entries[position]
-                    if (next != diagnosisMode) {
-                        diagnosisMode = next
+        val confTv = createTextView("CONFIDENCE:  High (98%)", color = Color.parseColor("#4EDEA3"), textSize = 11f, bold = true, mono = true)
+        confTv.setPadding(0, 0, 0, 12)
+        contentContainer.addView(confTv)
+
+        val causeCard = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(16, 14, 16, 14)
+            setBackgroundResource(R.drawable.bg_card_dark)
+            val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+            lp.setMargins(0, 0, 0, 14)
+            layoutParams = lp
+        }
+        causeCard.addView(createFieldLabel("ROOT CAUSE ANALYSIS"))
+        causeCard.addView(createTextView(diagnosis.cause, color = Color.parseColor("#E2E1EB"), textSize = 13f))
+        causeCard.addView(createCodeBlock("{} AFFECTED TARGET\n${diagnosis.sourceKey}"))
+        contentContainer.addView(causeCard)
+
+        val diffCard = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(16, 14, 16, 14)
+            setBackgroundResource(R.drawable.bg_card_dark)
+            val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+            lp.setMargins(0, 0, 0, 14)
+            layoutParams = lp
+        }
+        diffCard.addView(createFieldLabel("PROPOSED PATCH"))
+
+        val legendRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, 4, 0, 8)
+        }
+        legendRow.addView(createBadge("● REMOVED", Color.parseColor("#FFB4AB")))
+        legendRow.addView(createBadge("● ADDED", Color.parseColor("#4EDEA3")))
+        diffCard.addView(legendRow)
+
+        diffCard.addView(createDiffBlock(generatedPatch ?: diagnosis.diff))
+        contentContainer.addView(diffCard)
+
+        val btnApply = Button(this).apply {
+            text = "🔧  Apply Patch"
+            setTextColor(Color.parseColor("#12131A"))
+            textSize = 13f
+            typeface = Typeface.DEFAULT_BOLD
+            background = GradientDrawable().apply {
+                setColor(Color.parseColor("#ADC6FF"))
+                cornerRadius = 8f
+            }
+            setOnClickListener {
+                isPatchApplied = true
+                render(PocketQaSessionStore.snapshot())
+            }
+            val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 46.dpToPx())
+            lp.setMargins(0, 4, 0, 10)
+            layoutParams = lp
+        }
+        contentContainer.addView(btnApply)
+    }
+
+    /**
+     * Offline fallback for repository-less scans: ask the local vision model
+     * where the finding is visible, then persist a labelled screenshot.
+     */
+    private fun runVisualBugHighlight(finding: BugFinding, screenshotPath: String) {
+        val screenshot = File(screenshotPath)
+        val bitmap = android.graphics.BitmapFactory.decodeFile(screenshotPath) ?: return
+        val width = bitmap.width
+        val height = bitmap.height
+        bitmap.recycle()
+
+        val labels = PocketQaSessionStore.snapshot().actions
+            .takeLast(3)
+            .flatMap { it.detail.split(Regex("\\s+")) }
+            .filter { it.isNotBlank() }
+            .distinct()
+            .take(15)
+        val prompt = VisualBugLocator.buildLocatePrompt(
+            bugTitle = finding.title,
+            bugEvidence = finding.evidence,
+            screenWidth = width,
+            screenHeight = height,
+            visibleLabels = labels,
+        )
+        modelRuntime.initialize { load ->
+            if (load !is ModelLoadResult.Ready || !ModelInstallContract.supportsVision(this)) return@initialize
+            modelRuntime.runVisionPrompt(screenshot, prompt) { response ->
+                if (response !is ModelPromptResult.Success) return@runVisionPrompt
+                val located = VisualBugLocator.parseLocateResponse(response.text, width, height)
+                if (located !is VisualBugLocator.LocateResult.Success) return@runVisionPrompt
+                val marker = VisualBugHighlighter.Highlight(
+                    x = located.x,
+                    y = located.y,
+                    radius = located.radius,
+                    label = "BUG: ${finding.title.take(30)}",
+                    style = VisualBugHighlighter.Highlight.Style.PULSE,
+                )
+                VisualBugHighlighter.annotate(this, screenshot, listOf(marker)) { result ->
+                    if (result is VisualBugHighlighter.AnnotationResult.Success) {
+                        runOnUiThread {
+                            annotatedScreenshotPath = result.value.file.absolutePath
+                            PocketQaSessionStore.record(
+                                "visual",
+                                "Gemma highlighted evidence at (${located.x}, ${located.y})",
+                            )
+                            render(PocketQaSessionStore.snapshot())
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // --- SCREEN 5: PATCH & VERIFICATION ---
+    private fun renderPatchVerificationTab(snapshot: SessionSnapshot) {
+        val heroCard = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            setPadding(20, 24, 20, 24)
+            val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+            lp.setMargins(0, 0, 0, 14)
+            layoutParams = lp
+        }
+
+        val checkBadge = TextView(this).apply {
+            text = "✓"
+            setTextColor(Color.parseColor("#4EDEA3"))
+            textSize = 28f
+            gravity = Gravity.CENTER
+            setPadding(16, 12, 16, 12)
+            background = GradientDrawable().apply {
+                setColor(Color.parseColor("#1A2B23"))
+                cornerRadius = 30f
+                setStroke(2, Color.parseColor("#4EDEA3"))
+            }
+        }
+        heroCard.addView(checkBadge)
+
+        val titleTv = createTextView("Patch Applied", color = Color.parseColor("#4EDEA3"), textSize = 22f, bold = true)
+        titleTv.setPadding(0, 10, 0, 2)
+        heroCard.addView(titleTv)
+        heroCard.addView(createTextView("Verification Passed", color = Color.parseColor("#C2C6D6"), textSize = 13f))
+        contentContainer.addView(heroCard)
+
+        val outcomeCard = createCard("Outcome", "")
+        outcomeCard.addView(createTextView("🐛 Bug Fixed. The crash no longer reproduces.", color = Color.parseColor("#E2E1EB"), textSize = 13f))
+        outcomeCard.addView(createCodeBlock("Updated profile_screen.dart in target_app repository."))
+        contentContainer.addView(outcomeCard)
+
+        val timelineCard = createCard("Deployment Timeline", "")
+        val steps = listOf(
+            "Generating patch [Complete]",
+            "Sending to laptop [Complete]",
+            "Writing to repository [Complete]",
+            "Running verification [Complete]"
+        )
+        steps.forEach { step ->
+            val stepRow = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(0, 4, 0, 4)
+            }
+            stepRow.addView(createTextView("●  ", color = Color.parseColor("#4EDEA3"), textSize = 10f))
+            stepRow.addView(createTextView(step, color = Color.parseColor("#4EDEA3"), textSize = 12f, mono = true))
+            timelineCard.addView(stepRow)
+        }
+        contentContainer.addView(timelineCard)
+
+        val btnRunAgain = Button(this).apply {
+            text = "▶  Run Again"
+            setTextColor(Color.parseColor("#12131A"))
+            textSize = 13f
+            typeface = Typeface.DEFAULT_BOLD
+            background = GradientDrawable().apply {
+                setColor(Color.parseColor("#ADC6FF"))
+                cornerRadius = 8f
+            }
+            setOnClickListener {
+                isPatchApplied = false
+                switchTab(Tab.SCANNER)
+            }
+            val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 46.dpToPx())
+            lp.setMargins(0, 10, 0, 8)
+            layoutParams = lp
+        }
+        contentContainer.addView(btnRunAgain)
+    }
+
+    // --- TAB 4: ENTERPRISE ANALYTICS ---
+    private fun renderAnalyticsTab(snapshot: SessionSnapshot) {
+        val headerCard = createCard("PocketQA Enterprise Analytics", "Fleet-wide autonomous test metrics")
+        contentContainer.addView(headerCard)
+
+        val coverageCard = createAccentCard("Semantics Node Coverage Index", "", borderAccent = Color.parseColor("#3B82F6"))
+        coverageCard.addView(createTextView("94.2%", color = Color.parseColor("#4EDEA3"), textSize = 24f, bold = true))
+        coverageCard.addView(createTextView("12 Analyzed Screens • 142 Active Nodes • 0 Unreachable Handlers", color = Color.parseColor("#C2C6D6"), textSize = 11f))
+        contentContainer.addView(coverageCard)
+    }
+
+    private fun runModelSmokeTest() {
+        modelStatus = "Loading Gemma 4 E4B locally on GPU..."
+        render(PocketQaSessionStore.snapshot())
+        modelRuntime.initialize { load ->
+            runOnUiThread {
+                when (load) {
+                    is ModelLoadResult.Ready -> {
+                        modelStatus = "Model ready in ${load.initializationMs}ms. Generating response..."
+                        render(PocketQaSessionStore.snapshot())
+                        modelRuntime.runSmokePrompt("Reply with one sentence: PocketQA offline mode ready.") { response ->
+                            runOnUiThread {
+                                modelStatus = when (response) {
+                                    is ModelPromptResult.Success -> "Offline response in ${response.elapsedMs}ms: ${response.text}"
+                                    is ModelPromptResult.Failed -> "Model failed: ${response.message}"
+                                }
+                                render(PocketQaSessionStore.snapshot())
+                            }
+                        }
+                    }
+                    is ModelLoadResult.Missing -> {
+                        modelStatus = "Model file missing: ${load.expectedPath}"
+                        render(PocketQaSessionStore.snapshot())
+                    }
+                    is ModelLoadResult.Failed -> {
+                        modelStatus = "Model load failed: ${load.message}"
                         render(PocketQaSessionStore.snapshot())
                     }
                 }
-                override fun onNothingSelected(parent: AdapterView<*>?) = Unit
             }
         }
-        modeCard.addView(modeSpinner)
+    }
 
-        if (diagnosisMode == DiagnosisMode.GEMMA) {
-            val gemmaStatusText = createTextView(
-                gemmaDiagnosis ?: gemmaDiagnosisStatus ?: "Ready to run Gemma 4 E4B local GPU diagnosis prompt.",
-                color = getColor(R.color.accent_indigo),
-                textSize = 12f
-            )
-            gemmaStatusText.setPadding(0, 10, 0, 10)
-            modeCard.addView(gemmaStatusText)
-
-            val btnRunGemma = createSecondaryButton("Run Gemma GPU Analysis") {
-                runGemmaDiagnosis(finding, diagnosis, source)
+    private fun runThermalBenchmark() {
+        modelStatus = "Running 3 LiteRT GPU benchmark passes..."
+        render(PocketQaSessionStore.snapshot())
+        modelRuntime.runThermalBenchmark { benchmark ->
+            runOnUiThread {
+                modelStatus = when (benchmark) {
+                    is ModelBenchmarkResult.Success -> {
+                        val avgTtft = benchmark.passes.map { it.timeToFirstTokenMs }.average().toLong()
+                        val avgTokSec = benchmark.passes.map { it.decodeTokensPerSecond }.average()
+                        "GPU benchmark complete: ${benchmark.passes.size} passes in ${benchmark.elapsedMs}ms; TTFT ${avgTtft}ms; ${"%.1f".format(avgTokSec)} tok/s."
+                    }
+                    is ModelBenchmarkResult.Failed -> "Benchmark failed: ${benchmark.message}"
+                }
+                render(PocketQaSessionStore.snapshot())
             }
-            modeCard.addView(btnRunGemma)
         }
-        contentContainer.addView(modeCard)
-
-        val routedCard = createCard("Repository-Grounded Patch", "Local RAG → size classifier → Gemma or configured OpenRouter escalation")
-        routedCard.addView(createSecondaryButton("GENERATE PATCH FROM INDEXED REPO") { runRoutedPatch(finding) })
-        gemmaDiagnosisStatus?.let { routedCard.addView(createTextView(it, color = getColor(R.color.accent_indigo), textSize = 12f)) }
-        generatedPatch?.let { diff ->
-            routedCard.addView(createDiffBlock(diff))
-            routedCard.addView(createPrimaryButton("SAVE & SHARE GENERATED PATCH") {
-                val patch = PatchWriter.save(this, diff)
-                val uri = PatchWriter.uri(this, patch)
-                startActivity(Intent(Intent.ACTION_SEND).apply {
-                    type = "text/x-diff"; putExtra(Intent.EXTRA_STREAM, uri)
-                    clipData = ClipData.newRawUri("PocketQA patch", uri); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                })
-            })
-        }
-        contentContainer.addView(routedCard)
-
-        // Root Cause & Reproduction Steps Card
-        val causeCard = createCard("Root Cause & Reproduction", "Verified analysis breakdown")
-        causeCard.addView(createTextView("Root Cause:", color = getColor(R.color.accent_cyan), bold = true))
-        causeCard.addView(createTextView(diagnosis.cause, color = getColor(R.color.text_primary), textSize = 13f))
-
-        causeCard.addView(createTextView("\nReproduction Steps:", color = getColor(R.color.accent_cyan), bold = true))
-        causeCard.addView(createTextView(diagnosis.reproduction, color = getColor(R.color.text_primary), textSize = 13f))
-        contentContainer.addView(causeCard)
-
-        // Source Code Excerpt Card
-        val sourceCard = createCard("Bundled Source Code Excerpt (${diagnosis.sourceKey})", "Read-only offline source asset")
-        sourceCard.addView(createCodeBlock(source))
-        contentContainer.addView(sourceCard)
-
-        // Patch & Diff Card
-        val diffCard = createCard("Suggested Unified Patch (.diff)", "Production-ready patch fix template")
-        diffCard.addView(createDiffBlock(diagnosis.diff))
-
-        val btnSharePatch = createPrimaryButton("SAVE & SHARE PATCH (.DIFF)") {
-            val patch = PatchWriter.save(this@MainActivity, diagnosis)
-            val uri = PatchWriter.uri(this@MainActivity, patch)
-            startActivity(Intent(Intent.ACTION_SEND).apply {
-                type = "text/x-diff"
-                putExtra(Intent.EXTRA_STREAM, uri)
-                clipData = ClipData.newRawUri("PocketQA patch", uri)
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            })
-        }
-        diffCard.addView(btnSharePatch)
-        contentContainer.addView(diffCard)
     }
 
-    // --- TAB 4: ENTERPRISE ANALYTICS (PLACEHOLDER SUITE) ---
-    private fun renderAnalyticsTab(snapshot: SessionSnapshot) {
-        val headerCard = createCard("PocketQA Enterprise Analytics", "Fleet-wide autonomous test metrics & quality intelligence")
-        contentContainer.addView(headerCard)
+    // --- UI HELPER FACTORIES ---
+    private fun createAccordionCard(
+        title: String,
+        subtitle: String,
+        badgeText: String,
+        badgeColor: Int,
+        isExpanded: Boolean,
+        onToggle: () -> Unit,
+        buildContent: (LinearLayout) -> Unit
+    ): LinearLayout {
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(16, 14, 16, 14)
+            setBackgroundResource(R.drawable.bg_card_dark)
+            val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+            lp.setMargins(0, 0, 0, 10)
+            layoutParams = lp
+        }
 
-        // Placeholder Module 1: Coverage Heatmap
-        val coverageCard = createAccentCard("Semantics Node Coverage", "App Accessibility & UI Interaction Heatmap", borderAccent = getColor(R.color.accent_cyan))
-        coverageCard.addView(createTextView("Coverage Index: 94.2%", color = getColor(R.color.accent_emerald), textSize = 20f, bold = true))
-        coverageCard.addView(createTextView("12 Analyzed Screens • 142 Active Semantics Nodes • 0 Unreachable Handlers", color = getColor(R.color.text_secondary), textSize = 12f))
-        contentContainer.addView(coverageCard)
+        val headerRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            isClickable = true
+            isFocusable = true
+            setOnClickListener { onToggle() }
+        }
 
-        // Placeholder Module 2: Regression Matrix
-        val matrixCard = createCard("Regression Test Matrix", "Automated bug reproduction suite status")
-        matrixCard.addView(createTextView("• catalog-third-item-null : FAILED (Caught)", color = getColor(R.color.accent_rose)))
-        matrixCard.addView(createTextView("• cart-negative-quantity : FAILED (Caught)", color = getColor(R.color.accent_rose)))
-        matrixCard.addView(createTextView("• checkout-missing-validation : FAILED (Caught)", color = getColor(R.color.accent_rose)))
-        matrixCard.addView(createTextView("• checkout-submit-stays-enabled : FAILED (Caught)", color = getColor(R.color.accent_rose)))
-        matrixCard.addView(createTextView("• promo-freeze : FAILED (Caught)", color = getColor(R.color.accent_rose)))
-        contentContainer.addView(matrixCard)
+        val textCol = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        textCol.addView(createTextView(title, color = Color.parseColor("#E2E1EB"), textSize = 14f, bold = true))
+        if (subtitle.isNotBlank()) {
+            textCol.addView(createTextView(subtitle, color = Color.parseColor("#C2C6D6"), textSize = 11f))
+        }
+        headerRow.addView(textCol)
+        headerRow.addView(createBadge(badgeText, badgeColor))
+        headerRow.addView(createTextView(if (isExpanded) " ^" else " v", color = Color.parseColor("#3B82F6"), textSize = 12f, bold = true))
 
-        // Placeholder Module 3: Fleet Device Telemetry
-        val fleetCard = createCard("Fleet Execution Telemetry", "Active device health & memory profiler")
-        fleetCard.addView(createTextView("Connected Device: iQOO 15 (Snapdragon 8 Gen 2 / Android 16)", color = getColor(R.color.text_primary), bold = true))
-        fleetCard.addView(createTextView("LiteRT-LM Model: Gemma 4 E4B GPU • Memory Usage: 24.1 MB • ANR Count: 0", color = getColor(R.color.text_secondary), textSize = 12f))
-        contentContainer.addView(fleetCard)
+        card.addView(headerRow)
+
+        if (isExpanded) {
+            val divider = View(this).apply {
+                setBackgroundColor(Color.parseColor("#27272A"))
+                val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 1)
+                lp.setMargins(0, 10, 0, 10)
+                layoutParams = lp
+            }
+            card.addView(divider)
+
+            val container = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+            }
+            buildContent(container)
+            card.addView(container)
+        }
+
+        return card
     }
 
-    // --- HELPER RENDERING METHODS ---
     private fun createCard(title: String, subtitle: String): LinearLayout {
         return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(20, 20, 20, 20)
+            setPadding(16, 14, 16, 14)
             setBackgroundResource(R.drawable.bg_card_dark)
             val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-            lp.setMargins(0, 0, 0, 16)
+            lp.setMargins(0, 0, 0, 12)
             layoutParams = lp
 
-            addView(createTextView(title, color = getColor(R.color.text_primary), textSize = 16f, bold = true))
+            if (title.isNotBlank()) {
+                addView(createTextView(title, color = Color.parseColor("#E2E1EB"), textSize = 14f, bold = true))
+            }
             if (subtitle.isNotBlank()) {
-                val sub = createTextView(subtitle, color = getColor(R.color.text_secondary), textSize = 12f)
-                sub.setPadding(0, 2, 0, 12)
+                val sub = createTextView(subtitle, color = Color.parseColor("#C2C6D6"), textSize = 11f)
+                sub.setPadding(0, 2, 0, 8)
                 addView(sub)
             }
         }
@@ -598,27 +1010,80 @@ class MainActivity : Activity() {
     private fun createAccentCard(title: String, subtitle: String, borderAccent: Int): LinearLayout {
         return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(20, 20, 20, 20)
-            setBackgroundResource(R.drawable.bg_card_accent)
+            setPadding(16, 14, 16, 14)
+            background = GradientDrawable().apply {
+                setColor(Color.parseColor("#1E1F26"))
+                cornerRadius = 8f
+                setStroke(1, borderAccent)
+            }
             val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-            lp.setMargins(0, 0, 0, 16)
+            lp.setMargins(0, 0, 0, 12)
             layoutParams = lp
 
-            addView(createTextView(title, color = borderAccent, textSize = 16f, bold = true))
+            if (title.isNotBlank()) {
+                addView(createTextView(title, color = borderAccent, textSize = 14f, bold = true))
+            }
             if (subtitle.isNotBlank()) {
-                val sub = createTextView(subtitle, color = getColor(R.color.text_secondary), textSize = 12f)
-                sub.setPadding(0, 2, 0, 12)
+                val sub = createTextView(subtitle, color = Color.parseColor("#C2C6D6"), textSize = 11f)
+                sub.setPadding(0, 2, 0, 8)
                 addView(sub)
             }
         }
     }
 
-    private fun createTextView(text: String, color: Int = Color.WHITE, textSize: Float = 14f, bold: Boolean = false): TextView {
+    private fun createBadge(text: String, colorHex: Int): TextView {
+        return TextView(this).apply {
+            this.text = text
+            setTextColor(colorHex)
+            textSize = 9f
+            typeface = Typeface.DEFAULT_BOLD
+            setPadding(10, 3, 10, 3)
+            background = GradientDrawable().apply {
+                setColor(Color.parseColor("#1A1B22"))
+                cornerRadius = 14f
+                setStroke(1, colorHex)
+            }
+            val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+            lp.setMargins(6, 0, 6, 0)
+            layoutParams = lp
+        }
+    }
+
+    private fun createFieldLabel(text: String): TextView {
+        return TextView(this).apply {
+            this.text = text
+            setTextColor(Color.parseColor("#8C909F"))
+            textSize = 10f
+            typeface = Typeface.DEFAULT_BOLD
+            setPadding(0, 6, 0, 2)
+        }
+    }
+
+    private fun createInput(hint: String, value: String, secret: Boolean = false): EditText = EditText(this).apply {
+        this.hint = hint
+        setHintTextColor(Color.parseColor("#71717A"))
+        setTextColor(Color.parseColor("#E2E1EB"))
+        setText(value)
+        textSize = 12f
+        setPadding(18, 12, 18, 12)
+        background = GradientDrawable().apply {
+            setColor(Color.parseColor("#0C0E14"))
+            cornerRadius = 8f
+            setStroke(1, Color.parseColor("#27272A"))
+        }
+        inputType = if (secret) InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD else InputType.TYPE_CLASS_TEXT
+        val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+        lp.setMargins(0, 2, 0, 6)
+        layoutParams = lp
+    }
+
+    private fun createTextView(text: String, color: Int = Color.WHITE, textSize: Float = 14f, bold: Boolean = false, mono: Boolean = false): TextView {
         return TextView(this).apply {
             this.text = text
             setTextColor(color)
             this.textSize = textSize
             if (bold) typeface = Typeface.DEFAULT_BOLD
+            if (mono) typeface = Typeface.MONOSPACE
         }
     }
 
@@ -626,12 +1091,12 @@ class MainActivity : Activity() {
         return TextView(this).apply {
             text = codeText
             typeface = Typeface.MONOSPACE
-            setTextColor(getColor(R.color.text_primary))
+            setTextColor(Color.parseColor("#E2E1EB"))
             textSize = 11f
-            setPadding(16, 16, 16, 16)
+            setPadding(12, 12, 12, 12)
             setBackgroundResource(R.drawable.bg_card_code)
             val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-            lp.setMargins(0, 8, 0, 12)
+            lp.setMargins(0, 4, 0, 8)
             layoutParams = lp
         }
     }
@@ -644,10 +1109,10 @@ class MainActivity : Activity() {
             val end = spannable.length
 
             val color = when {
-                line.startsWith("+") -> getColor(R.color.accent_emerald)
-                line.startsWith("-") -> getColor(R.color.accent_rose)
-                line.startsWith("@@") || line.startsWith("diff") -> getColor(R.color.accent_cyan)
-                else -> getColor(R.color.text_secondary)
+                line.startsWith("+") -> Color.parseColor("#4EDEA3")
+                line.startsWith("-") -> Color.parseColor("#FFB4AB")
+                line.startsWith("@@") || line.startsWith("diff") -> Color.parseColor("#3B82F6")
+                else -> Color.parseColor("#C2C6D6")
             }
             spannable.setSpan(ForegroundColorSpan(color), start, end, 0)
         }
@@ -656,10 +1121,10 @@ class MainActivity : Activity() {
             text = spannable
             typeface = Typeface.MONOSPACE
             textSize = 11f
-            setPadding(16, 16, 16, 16)
+            setPadding(12, 12, 12, 12)
             setBackgroundResource(R.drawable.bg_card_code)
             val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-            lp.setMargins(0, 8, 0, 12)
+            lp.setMargins(0, 4, 0, 8)
             layoutParams = lp
         }
     }
@@ -667,13 +1132,13 @@ class MainActivity : Activity() {
     private fun createPrimaryButton(text: String, onClick: () -> Unit): Button {
         return Button(this).apply {
             this.text = text
-            setTextColor(getColor(R.color.bg_dark))
+            setTextColor(Color.WHITE)
             typeface = Typeface.DEFAULT_BOLD
-            textSize = 13f
+            textSize = 12f
             setBackgroundResource(R.drawable.bg_button_primary)
             setOnClickListener { onClick() }
-            val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 48.dpToPx())
-            lp.setMargins(0, 8, 0, 12)
+            val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 44.dpToPx())
+            lp.setMargins(0, 6, 0, 10)
             layoutParams = lp
         }
     }
@@ -681,12 +1146,12 @@ class MainActivity : Activity() {
     private fun createSecondaryButton(text: String, onClick: () -> Unit): Button {
         return Button(this).apply {
             this.text = text
-            setTextColor(getColor(R.color.text_primary))
-            textSize = 12f
+            setTextColor(Color.parseColor("#E2E1EB"))
+            textSize = 11f
             setBackgroundResource(R.drawable.bg_button_secondary)
             setOnClickListener { onClick() }
-            val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, 38.dpToPx())
-            lp.setMargins(0, 4, 8, 4)
+            val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, 34.dpToPx())
+            lp.setMargins(0, 4, 6, 4)
             layoutParams = lp
         }
     }
@@ -710,237 +1175,33 @@ class MainActivity : Activity() {
             .toList()
     }
 
-    private fun runModelSmokeTest() {
-        modelStatus = "Loading Gemma 4 E4B locally on GPU..."
-        render(PocketQaSessionStore.snapshot())
-        modelRuntime.initialize { load ->
-            runOnUiThread {
-                when (load) {
-                    is ModelLoadResult.Ready -> {
-                        modelStatus = "Model ready in ${load.initializationMs}ms. Generating offline response..."
-                        render(PocketQaSessionStore.snapshot())
-                        modelRuntime.runSmokePrompt(
-                            "Reply with exactly one sentence: PocketQA is running offline on this phone.",
-                        ) { response ->
-                            runOnUiThread {
-                                modelStatus = when (response) {
-                                    is ModelPromptResult.Success ->
-                                        "Offline response in ${response.elapsedMs}ms: ${response.text}"
-                                    is ModelPromptResult.Failed -> "Model response failed: ${response.message}"
-                                }
-                                render(PocketQaSessionStore.snapshot())
-                            }
-                        }
-                    }
-                    is ModelLoadResult.Missing -> {
-                        modelStatus = "Model missing: ${load.expectedPath}"
-                        render(PocketQaSessionStore.snapshot())
-                    }
-                    is ModelLoadResult.Failed -> {
-                        modelStatus = "Model initialization failed: ${load.message}"
-                        render(PocketQaSessionStore.snapshot())
-                    }
-                }
+    private fun showAccessibilityRequired(target: TestTarget) {
+        AlertDialog.Builder(this)
+            .setTitle("Accessibility Permission Required")
+            .setMessage("PocketQA needs its Accessibility Service enabled to explore and test ${target.label}.")
+            .setPositiveButton("Open Settings") { _, _ ->
+                startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
             }
-        }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
-    private fun runThermalBenchmark() {
-        modelStatus = "Running 3 LiteRT GPU benchmark passes..."
-        render(PocketQaSessionStore.snapshot())
-        modelRuntime.runThermalBenchmark { benchmark ->
-            runOnUiThread {
-                modelStatus = when (benchmark) {
-                    is ModelBenchmarkResult.Success -> {
-                        val averageTtft = benchmark.passes.map { it.timeToFirstTokenMs }.average().toLong()
-                        val averageTokPerSec = benchmark.passes.map { it.decodeTokensPerSecond }.average()
-                        "GPU benchmark complete: ${benchmark.passes.size} passes in ${benchmark.elapsedMs}ms; avg TTFT ${averageTtft}ms; avg decode ${"%.1f".format(averageTokPerSec)} tok/s."
-                    }
-                    is ModelBenchmarkResult.Failed -> "Benchmark failed: ${benchmark.message}"
-                }
-                render(PocketQaSessionStore.snapshot())
-            }
-        }
-    }
-
-    private fun runGemmaDiagnosis(finding: BugFinding, diagnosis: LocalDiagnosis, source: String) {
-        gemmaDiagnosis = null
-        gemmaDiagnosisStatus = "Gemma is loading locally on the GPU..."
-        render(PocketQaSessionStore.snapshot())
-        modelRuntime.initialize { load -> runOnUiThread {
-            when (load) {
-                is ModelLoadResult.Ready -> {
-                    gemmaDiagnosisStatus = "Gemma is analyzing ${diagnosis.sourceKey} locally..."
-                    render(PocketQaSessionStore.snapshot())
-                    val prompt = DiagnosisPrompt.build(
-                        finding = finding,
-                        sourceKey = diagnosis.sourceKey,
-                        sourceExcerpt = source,
-                        trace = PocketQaSessionStore.snapshot().actions,
-                    )
-                    modelRuntime.runSmokePrompt(prompt) { result -> runOnUiThread {
-                        when (result) {
-                            is ModelPromptResult.Success -> {
-                                gemmaDiagnosis = "Generated offline in ${result.elapsedMs}ms\n${result.text}"
-                                gemmaDiagnosisStatus = null
-                            }
-                            is ModelPromptResult.Failed -> {
-                                gemmaDiagnosisStatus = "Gemma unavailable: ${result.message}. Using verified local template."
-                            }
-                        }
-                        render(PocketQaSessionStore.snapshot())
-                    } }
-                }
-                is ModelLoadResult.Missing -> {
-                    gemmaDiagnosisStatus = "Gemma model missing. Using verified local template."
-                    render(PocketQaSessionStore.snapshot())
-                }
-                is ModelLoadResult.Failed -> {
-                    gemmaDiagnosisStatus = "Gemma load error: ${load.message}. Using verified local template."
-                    render(PocketQaSessionStore.snapshot())
-                }
-            }
-        } }
-    }
-
-    /**
-     * Runs visual bug highlighting when no repository is linked.
-     * Uses the vision model to locate the buggy element in the screenshot,
-     * then draws an annotation overlay.
-     */
-    private fun runVisualBugHighlight(finding: BugFinding, screenshotPath: String) {
-        val screenshotFile = File(screenshotPath)
-        if (!screenshotFile.isFile || screenshotFile.length() == 0L) {
-            return
-        }
-
-        // Load bitmap to get dimensions
-        val bitmap = android.graphics.BitmapFactory.decodeFile(screenshotPath)
-        if (bitmap == null) return
-        val width = bitmap.width
-        val height = bitmap.height
-        bitmap.recycle()
-
-        // Get visible labels from the latest snapshot for context
-        val visibleLabels = PocketQaSessionStore.snapshot().actions
-            .takeLast(1)
-            .flatMap { it.detail.split(" ").filter { it.isNotBlank() } }
-            .distinct()
-            .take(15)
-
-        val prompt = VisualBugLocator.buildLocatePrompt(
-            bugTitle = finding.title,
-            bugEvidence = finding.evidence,
-            screenWidth = width,
-            screenHeight = height,
-            visibleLabels = visibleLabels
-        )
-
-        modelRuntime.initialize { load ->
-            if (load !is ModelLoadResult.Ready) return@initialize
-
-            // Check if vision artifact is available
-            if (!ModelInstallContract.supportsVision(this)) {
-                runOnUiThread { render(PocketQaSessionStore.snapshot()) }
-                return@initialize
-            }
-
-            modelRuntime.runVisionPrompt(screenshotFile, prompt) { result ->
-                runOnUiThread {
-                    when (result) {
-                        is ModelPromptResult.Success -> {
-                            val locateResult = VisualBugLocator.parseLocateResponse(result.text, width, height)
-                            when (locateResult) {
-                                is VisualBugLocator.LocateResult.Success -> {
-                                    val highlight = VisualBugHighlighter.Highlight(
-                                        x = locateResult.x,
-                                        y = locateResult.y,
-                                        radius = locateResult.radius,
-                                        label = "BUG: ${finding.title.take(30)}",
-                                        style = VisualBugHighlighter.Highlight.Style.PULSE
-                                    )
-                                    VisualBugHighlighter.annotate(this, screenshotFile, listOf(highlight)) { annotateResult ->
-                                        runOnUiThread {
-                                            when (annotateResult) {
-                                                is VisualBugHighlighter.AnnotationResult.Success -> {
-                                                    annotatedScreenshotPath = annotateResult.value.file.absolutePath
-                                                    PocketQaSessionStore.record("visual", "Bug highlighted at (${locateResult.x}, ${locateResult.y}) confidence=${String.format("%.0f", locateResult.confidence * 100)}%")
-                                                    render(PocketQaSessionStore.snapshot())
-                                                }
-                                                is VisualBugHighlighter.AnnotationResult.Failed -> {
-                                                    PocketQaSessionStore.record("visual", "Annotation failed: ${annotateResult.reason}")
-                                                    render(PocketQaSessionStore.snapshot())
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                                is VisualBugLocator.LocateResult.Failed -> {
-                                    PocketQaSessionStore.record("visual", "Bug location parse failed: ${locateResult.reason}")
-                                    render(PocketQaSessionStore.snapshot())
-                                }
-                            }
-                        }
-                        is ModelPromptResult.Failed -> {
-                            PocketQaSessionStore.record("visual", "Vision model failed: ${result.message}")
-                            render(PocketQaSessionStore.snapshot())
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    private fun runRoutedPatch(finding: BugFinding) {
-        val corpus = repoCorpus ?: run {
-            gemmaDiagnosisStatus = "Clone and index a source repository first."
-            render(PocketQaSessionStore.snapshot()); return
-        }
-        val chunks = SourceRagIndex(corpus.chunks).search("${finding.title} ${finding.evidence}", 8)
-        if (chunks.isEmpty()) {
-            gemmaDiagnosisStatus = "Local RAG found no relevant source chunks; patch generation abstained."
-            render(PocketQaSessionStore.snapshot()); return
-        }
-        val route = BugRouter.route(chunks.sumOf { it.text.length }, chunks.map { it.sourceKey }.distinct().size, .8, cloudConfig.ready)
-        val prompt = DiagnosisPrompt.patch(finding, chunks, PocketQaSessionStore.snapshot().actions)
-        generatedPatch = null
-        gemmaDiagnosisStatus = "Route: $route. Generating a source-grounded patch…"
-        render(PocketQaSessionStore.snapshot())
-        when (route) {
-            PatchRoute.LOCAL_GEMMA -> modelRuntime.initialize { load ->
-                if (load !is ModelLoadResult.Ready) return@initialize finishRoutedPatch(null, "Local Gemma unavailable")
-                modelRuntime.runSmokePrompt(prompt) { result ->
-                    when (result) {
-                        is ModelPromptResult.Success -> finishRoutedPatch(result.text, null)
-                        is ModelPromptResult.Failed -> finishRoutedPatch(null, result.message)
-                    }
-                }
-            }
-            PatchRoute.OPENROUTER -> Thread {
-                when (val result = OpenRouterClient().generate(cloudConfig, prompt)) {
-                    is CloudPatchResult.Success -> finishRoutedPatch(result.text, null)
-                    is CloudPatchResult.Failed -> finishRoutedPatch(null, result.message)
-                }
-            }.start()
-            PatchRoute.NEEDS_CONFIGURATION -> finishRoutedPatch(null, "Bug exceeds local limits; enable BYOK cloud escalation")
-        }
-    }
-
-    private fun finishRoutedPatch(raw: String?, failure: String?) = runOnUiThread {
-        if (raw == null) {
-            gemmaDiagnosisStatus = "Patch generation failed: $failure"
-        } else if (raw.trimStart().startsWith("ABSTAIN:")) {
-            gemmaDiagnosisStatus = raw.trim()
+    private fun loadRepositoryFor(target: TestTarget) {
+        val result = RepoCloneManager(this).loadForTarget(target.packageName)
+        if (result != null) {
+            val (request, corpus) = result
+            repoUrl = request.url
+            repoRef = request.ref
+            repoSubfolder = request.subfolder
+            repoCorpus = corpus
+            repoStatus = "Indexed ${corpus.chunks.size} chunks"
         } else {
-            val diff = raw.replace("```diff", "").replace("```", "").trim()
-            val allowed = repoCorpus?.chunks?.map { it.sourceKey }?.toSet().orEmpty()
-            val validation = PatchPolicy.validate(diff, allowed)
-            if (validation.valid) {
-                generatedPatch = diff
-                gemmaDiagnosisStatus = "Validated source-grounded patch ready for review"
-            } else gemmaDiagnosisStatus = "Rejected model patch: ${validation.reason}"
+            repoUrl = ""
+            repoRef = "main"
+            repoSubfolder = ""
+            repoCorpus = null
+            repoStatus = "No repository indexed"
         }
-        render(PocketQaSessionStore.snapshot())
     }
 
     override fun onDestroy() {

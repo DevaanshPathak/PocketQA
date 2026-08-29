@@ -21,20 +21,20 @@ class TestingOverlay(private val service: AccessibilityService) {
             return
         }
         val text = TextView(service).apply {
-            setTextColor(Color.WHITE)
+            setTextColor(Color.parseColor("#E2E1EB"))
             textSize = 13f
-            setPadding(28, 20, 28, 20)
+            setPadding(24, 16, 24, 16)
             this.text = message
         }
         val view = LinearLayout(service).apply {
             orientation = LinearLayout.VERTICAL
             addView(text)
             background = GradientDrawable().apply {
-                setColor(Color.rgb(28, 36, 54))
-                cornerRadius = 28f
-                setStroke(2, Color.rgb(107, 205, 255))
+                setColor(Color.parseColor("#161616"))
+                cornerRadius = 12f // 4dp soft rounded radius in density
+                setStroke(2, Color.parseColor("#3B82F6"))
             }
-            elevation = 18f
+            elevation = 16f
         }
         val params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
