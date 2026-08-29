@@ -22,6 +22,7 @@ class PocketQaAccessibilityService : AccessibilityService() {
     private var gemmaHasGuidedRun = false
     private val autonomousVisitedLabels = mutableSetOf<String>()
     private val autonomousLabelActionCounts = mutableMapOf<String, Int>()
+    private val autonomousRejectedReplies = mutableListOf<String>()
     private var autonomousInitialProbeScheduled = false
     private var visualFallbackAttempts = 0
     private var visualFallbackInFlight = false
@@ -55,6 +56,7 @@ class PocketQaAccessibilityService : AccessibilityService() {
         gemmaHasGuidedRun = false
         autonomousVisitedLabels.clear()
         autonomousLabelActionCounts.clear()
+        autonomousRejectedReplies.clear()
         autonomousInitialProbeScheduled = false
         visualFallbackAttempts = 0
         visualFallbackInFlight = false
@@ -155,6 +157,7 @@ class PocketQaAccessibilityService : AccessibilityService() {
                                 candidates = candidates,
                                 screenWidth = captureResult.width,
                                 screenHeight = captureResult.height,
+                                rejectedReplies = autonomousRejectedReplies,
                             ),
                         ) { result ->
                             val response = (result as? ModelPromptResult.Success)?.text.orEmpty()
@@ -200,7 +203,11 @@ class PocketQaAccessibilityService : AccessibilityService() {
         if (choice == null && coordinate == null) {
             val detail = failure ?: "no valid action in response: ${response.take(180).replace('\n', ' ')}"
             Log.w(TAG, "Gemma autonomous response rejected: $detail")
-            stopAutonomousForModel(detail)
+            if (failure == null && autonomousRejectedReplies.size < MAX_MODEL_RETRIES) {
+                autonomousRejectedReplies += response.take(180)
+                PocketQaSessionStore.record("model", "Gemma reply rejected; retrying with current actions")
+                handler.postDelayed({ resumeAutonomousOnTargetWindow() }, 500)
+            } else stopAutonomousForModel(detail)
             return
         }
         if (coordinate != null) {
@@ -743,6 +750,7 @@ class PocketQaAccessibilityService : AccessibilityService() {
             "Increase quantity", "Decrease quantity",
         )
         private const val MAX_REPEATED_LABEL_ACTIONS = 3
+        private const val MAX_MODEL_RETRIES = 2
         private val SYSTEM_NAVIGATION_LABELS = setOf("Back", "Home", "Recents", "Overview")
     }
 }

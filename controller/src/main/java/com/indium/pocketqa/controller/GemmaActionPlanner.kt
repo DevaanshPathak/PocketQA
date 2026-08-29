@@ -14,6 +14,7 @@ object GemmaActionPlanner {
         candidates: List<String>,
         screenWidth: Int? = null,
         screenHeight: Int? = null,
+        rejectedReplies: List<String> = emptyList(),
     ): String = """
         You are PocketQA, an offline Android UI test planner.
         Inspect the screen image, its Semantics summary, and every listed action
@@ -28,6 +29,8 @@ object GemmaActionPlanner {
         go below its minimum. Also test increase/decrease reversals, empty
         states, validation, retry, and navigation when their controls exist.
         Report an issue only when the image or observed UI text is evidence.
+        If an Available action starts with Add, choose it before opening a cart or checkout.
+        The Available actions list is authoritative; never choose a label outside it.
         Then choose one safe action that advances functional testing.
         Reply with exactly two lines:
         ISSUE: NONE  OR  ISSUE: <short title> | <visible evidence>
@@ -40,6 +43,7 @@ object GemmaActionPlanner {
         Screen: $screenSummary
         Available actions:
         ${candidates.joinToString("\n") { "- $it" }}
+        Rejected prior replies: ${rejectedReplies.takeLast(2).joinToString(" | ").ifBlank { "none" }}
     """.trimIndent()
 
     fun chooseLabel(response: String, candidates: List<String>): String? {
