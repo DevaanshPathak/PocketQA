@@ -8,8 +8,8 @@ enum class TestGoal(val title: String, val description: String) {
 
 enum class ExplorationMode(val label: String) {
     DETERMINISTIC("Deterministic (fast fallback)"),
-    GEMMA_ASSISTED("Gemma-assisted (local GPU)"),
-    GEMMA_AUTONOMOUS("Gemma autonomous (no fallback)");
+    GEMMA_ASSISTED("Guided Gemma QA (local GPU)"),
+    GEMMA_AUTONOMOUS("Experimental vision explorer");
 
     override fun toString(): String = label
 }

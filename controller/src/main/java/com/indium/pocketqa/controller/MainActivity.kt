@@ -32,7 +32,7 @@ class MainActivity : Activity() {
     private lateinit var modelRuntime: LiteRtModelRuntime
     private var modelStatus = "Model engine uninitialized (Tap smoke test to load)"
     private var selectedTarget: TestTarget? = null
-    private var explorationMode = ExplorationMode.DETERMINISTIC
+    private var explorationMode = ExplorationMode.GEMMA_ASSISTED
     private var selectedFinding: BugFinding? = null
     private var gemmaDiagnosis: String? = null
     private var gemmaDiagnosisStatus: String? = null
@@ -142,11 +142,12 @@ class MainActivity : Activity() {
         // Strategy Card
         val strategyCard = createCard("Autonomous Exploration Strategy", "Choose decision engine for UI navigation")
         val strategySpinner = Spinner(this).apply {
-            adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, ExplorationMode.entries)
-            setSelection(explorationMode.ordinal)
+            val demoModes = listOf(ExplorationMode.GEMMA_ASSISTED, ExplorationMode.DETERMINISTIC)
+            adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, demoModes)
+            setSelection(demoModes.indexOf(explorationMode).coerceAtLeast(0))
             onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
                 override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                    explorationMode = ExplorationMode.entries[position]
+                    explorationMode = demoModes[position]
                 }
                 override fun onNothingSelected(parent: AdapterView<*>?) = Unit
             }
@@ -156,8 +157,8 @@ class MainActivity : Activity() {
         val strategyInfo = createTextView(
             when (explorationMode) {
                 ExplorationMode.DETERMINISTIC -> "Deterministic Safety Trace: Bounded visible actions, high reliability, zero latency overhead."
-                ExplorationMode.GEMMA_ASSISTED -> "Gemma-Assisted Hybrid: Local GPU model selects initial catalog step, followed by safety trace."
-                ExplorationMode.GEMMA_AUTONOMOUS -> "Gemma Autonomous AI: On-device GPU model makes 100% of action decisions from live Semantics."
+                ExplorationMode.GEMMA_ASSISTED -> "Guided Gemma QA: reliable on-device exploration with local Gemma triage and source-grounded patches."
+                ExplorationMode.GEMMA_AUTONOMOUS -> "Experimental vision explorer."
             },
             color = getColor(R.color.text_secondary),
             textSize = 12f
