@@ -406,10 +406,23 @@ class PocketQaAccessibilityService : AccessibilityService() {
                 handler.post { applyGemmaCatalogChoice(null, "model unavailable", candidates) }
                 return@initialize
             }
-            modelRuntime.runSmokePrompt(GemmaActionPlanner.prompt(snapshot.label ?: "catalog", candidates)) { result ->
-                val response = (result as? ModelPromptResult.Success)?.text.orEmpty()
-                val choice = GemmaActionPlanner.chooseLabel(response, candidates)
-                handler.post { applyGemmaCatalogChoice(choice, response, candidates) }
+            ScreenshotCapture.capture(this) { capture ->
+                if (capture is ScreenshotCapture.CaptureResult.Success) {
+                    PocketQaSessionStore.recordScreenshot(capture.file.absolutePath)
+                    PocketQaSessionStore.record("visual", "Guided Gemma captured ${capture.width}x${capture.height} for local visual triage")
+                    testingOverlay.show("PocketQA AI\nGemma inspecting screen locally…")
+                    modelRuntime.runVisionPrompt(capture.file, GemmaActionPlanner.prompt(snapshot.label ?: "catalog", candidates, capture.width, capture.height)) { result ->
+                        val response = (result as? ModelPromptResult.Success)?.text.orEmpty()
+                        val choice = GemmaActionPlanner.chooseLabel(response, candidates)
+                        handler.post { applyGemmaCatalogChoice(choice, response, candidates) }
+                    }
+                } else {
+                    modelRuntime.runSmokePrompt(GemmaActionPlanner.prompt(snapshot.label ?: "catalog", candidates)) { result ->
+                        val response = (result as? ModelPromptResult.Success)?.text.orEmpty()
+                        val choice = GemmaActionPlanner.chooseLabel(response, candidates)
+                        handler.post { applyGemmaCatalogChoice(choice, response, candidates) }
+                    }
+                }
             }
         }
     }
