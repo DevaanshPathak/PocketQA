@@ -11,7 +11,9 @@ data class LocalDiagnosis(
 object KnownBugCatalog {
     fun diagnose(finding: BugFinding): LocalDiagnosis = when {
         finding.title.contains("quantity", ignoreCase = true) -> LocalDiagnosis(
-            sourceKey = "lib/state/cart_provider.dart",
+            sourceKey = if (finding.evidence.contains("QuickCart", ignoreCase = true)) {
+                "bug_app/bugged/lib/providers/cart_provider.dart"
+            } else "lib/state/cart_provider.dart",
             cause = "The decrement action accepts zero and decrements it again, allowing a negative quantity.",
             reproduction = "Add an item, open the cart, then tap Decrease quantity twice.",
             diff = """--- a/lib/state/cart_provider.dart

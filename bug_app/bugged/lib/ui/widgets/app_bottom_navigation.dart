@@ -55,14 +55,17 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
               child: Semantics(
                 label: 'View Cart with $itemCount items, total ₹${cart.totalAmount.toStringAsFixed(0)}',
                 button: true,
-                child: InkWell(
-                  onTap: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(builder: (_) => const CartScreen()),
-                    );
-                  },
-                  child: Container(
+                child: Semantics(
+                  label: 'View Cart with $itemCount items',
+                  button: true,
+                  child: InkWell(
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => const CartScreen()),
+                      );
+                    },
+                    child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                     decoration: BoxDecoration(
                       color: QuickCartTheme.primaryDarkGreen,
@@ -134,6 +137,7 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
                           ],
                         ),
                       ],
+                    ),
                     ),
                   ),
                 ),

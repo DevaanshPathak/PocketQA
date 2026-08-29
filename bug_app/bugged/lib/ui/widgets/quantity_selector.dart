@@ -45,11 +45,15 @@ class QuantitySelector extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          IconButton(
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(minWidth: 32, minHeight: 36),
-            icon: const Icon(Icons.remove, size: 16, color: Colors.white),
-            onPressed: onDecrement,
+          Semantics(
+            label: 'Decrease quantity',
+            button: true,
+            child: IconButton(
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 32, minHeight: 36),
+              icon: const Icon(Icons.remove, size: 16, color: Colors.white),
+              onPressed: onDecrement,
+            ),
           ),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 4),
@@ -62,11 +66,15 @@ class QuantitySelector extends StatelessWidget {
               ),
             ),
           ),
-          IconButton(
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(minWidth: 32, minHeight: 36),
-            icon: const Icon(Icons.add, size: 16, color: Colors.white),
-            onPressed: onIncrement,
+          Semantics(
+            label: 'Increase quantity',
+            button: true,
+            child: IconButton(
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 32, minHeight: 36),
+              icon: const Icon(Icons.add, size: 16, color: Colors.white),
+              onPressed: onIncrement,
+            ),
           ),
         ],
       ),

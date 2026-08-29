@@ -14,4 +14,13 @@ class KnownBugCatalogTest {
         assertEquals("lib/state/cart_provider.dart", diagnosis.sourceKey)
         assertTrue(diagnosis.diff.contains("clamp"))
     }
+
+    @Test
+    fun quickCartQuantityFindingMapsToQuickCartSource() {
+        val diagnosis = KnownBugCatalog.diagnose(
+            BugFinding("Cart quantity goes below zero", "QuickCart showed quantity -1"),
+        )
+
+        assertEquals("bug_app/bugged/lib/providers/cart_provider.dart", diagnosis.sourceKey)
+    }
 }

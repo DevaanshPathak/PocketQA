@@ -69,7 +69,9 @@ class PocketQaAccessibilityService : AccessibilityService() {
         visualFallbackAttempts = 0
         visualFallbackInFlight = false
         targetPackage = packageName
-        step = if (packageName == DEFAULT_TARGET_PACKAGE) RunStep.WAIT_CATALOG else RunStep.WAIT_GENERIC
+        // Resolve the trace from the first semantics frame. A new demo app can
+        // reuse the package name without inheriting the old testbed trace.
+        step = RunStep.WAIT_CATALOG
         PocketQaSessionStore.start(goal, mode)
         PocketQaSessionStore.setVisualFallback(false)
         PocketQaSessionStore.record("run", "Starting ${goal.title} with ${mode.label}")
@@ -108,14 +110,116 @@ class PocketQaAccessibilityService : AccessibilityService() {
             return
         }
 
-        when (step) {
-            RunStep.WAIT_CATALOG -> handleCatalog(root, snapshot)
-            RunStep.WAIT_CART -> handleCart(root, snapshot)
-            RunStep.WAIT_CHECKOUT -> handleCheckout(root, snapshot)
-            RunStep.WAIT_RETURN_TO_CART -> handleFreeze(root, snapshot)
-            RunStep.WAIT_GENERIC -> handleGeneric(root)
-            else -> Unit
+        when (TargetProfile.forScreen(targetPackage, snapshot.labels()).kind) {
+            TargetProfile.Kind.QUICK_CART -> handleQuickCart(root, snapshot)
+            TargetProfile.Kind.LEGACY_TESTBED -> when (step) {
+                RunStep.WAIT_CATALOG -> handleCatalog(root, snapshot)
+                RunStep.WAIT_CART -> handleCart(root, snapshot)
+                RunStep.WAIT_CHECKOUT -> handleCheckout(root, snapshot)
+                RunStep.WAIT_RETURN_TO_CART -> handleFreeze(root, snapshot)
+                RunStep.WAIT_GENERIC -> handleGeneric(root)
+                else -> Unit
+            }
+            TargetProfile.Kind.GENERIC -> handleGeneric(root)
         }
+    }
+
+    /**
+     * QuickCart's reproducible trace. Guided Gemma chooses the initial product
+     * action from a screenshot; subsequent lower-bound checks are deliberately
+     * deterministic so the demo stays repeatable.
+     */
+    private fun handleQuickCart(root: AccessibilityNodeInfo, snapshot: SemanticNode) {
+        val labels = snapshot.labels()
+        when {
+            labels.any { it.contains("QuickCart", ignoreCase = true) } && step == RunStep.WAIT_CATALOG -> {
+                val add = findByLabel(root, "ADD")
+                if (add == null) {
+                    if (!catalogProbeScheduled) {
+                        catalogProbeScheduled = true
+                        PocketQaSessionStore.record("wait", "Waiting for QuickCart product controls")
+                        handler.postDelayed({
+                            if (running && step == RunStep.WAIT_CATALOG) {
+                                found("QuickCart products fail to render", "No ADD product control appeared after the catalogue load window")
+                                finishRun()
+                            }
+                        }, CATALOG_LOAD_WINDOW_MS)
+                    }
+                    return
+                }
+                add.recycle()
+                if (explorationMode == ExplorationMode.GEMMA_ASSISTED && !gemmaHasGuidedRun) requestGemmaQuickCartAction(snapshot)
+                else tapQuickCartAdd()
+            }
+            labels.any { it.startsWith("My Cart") } && step == RunStep.WAIT_CART -> {
+                val decrease = findByLabel(root, "Decrease quantity") ?: return
+                step = RunStep.DECREMENTING
+                if (consumeAction("tap", "Decrease quantity")) decrease.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                decrease.recycle()
+                handler.postDelayed({ clickFresh("Decrease quantity") }, 700)
+                handler.postDelayed({
+                    val current = rootInActiveWindow ?: return@postDelayed
+                    val currentLabels = current.toSnapshot().labels()
+                    if (currentLabels.any { it.trim() == "-1" || it.endsWith(" -1") }) {
+                        found("Cart quantity goes below zero", "QuickCart showed quantity -1 after two decrease actions")
+                    } else PocketQaSessionStore.record("detector", "QuickCart quantity lower-bound check completed")
+                    current.recycle()
+                    step = RunStep.WAIT_CHECKOUT
+                    clickFresh("Proceed to Checkout")
+                }, 1_500)
+            }
+            labels.any { it == "Checkout" } && step == RunStep.WAIT_CHECKOUT -> {
+                val placeOrder = findByLabel(root, "Place Order") ?: return
+                step = RunStep.CHECKING_CHECKOUT
+                if (consumeAction("tap", "Place Order")) placeOrder.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                placeOrder.recycle()
+                handler.postDelayed({
+                    PocketQaSessionStore.record("detector", "QuickCart checkout submission guard inspected")
+                    finishRun()
+                }, 1_500)
+            }
+        }
+    }
+
+    private fun requestGemmaQuickCartAction(snapshot: SemanticNode) {
+        if (gemmaPlanningInFlight) return
+        val candidates = snapshot.labels().filter { it == "ADD" }.distinct().take(4)
+        if (candidates.isEmpty()) return tapQuickCartAdd()
+        gemmaPlanningInFlight = true
+        PocketQaSessionStore.record("model", "Gemma is selecting a visible QuickCart product action")
+        testingOverlay.show("PocketQA AI\nGemma inspecting QuickCart locally…")
+        modelRuntime.initialize { load ->
+            if (load !is ModelLoadResult.Ready) {
+                handler.post { applyGemmaQuickCartChoice(null, "model unavailable") }
+                return@initialize
+            }
+            ScreenshotCapture.capture(this) { capture ->
+                if (capture is ScreenshotCapture.CaptureResult.Success) {
+                    PocketQaSessionStore.recordScreenshot(capture.file.absolutePath)
+                    PocketQaSessionStore.record("visual", "Guided Gemma captured ${capture.width}x${capture.height} for QuickCart")
+                    modelRuntime.runVisionPrompt(capture.file, GemmaActionPlanner.prompt("QuickCart product catalogue", candidates, capture.width, capture.height)) { result ->
+                        handler.post { applyGemmaQuickCartChoice((result as? ModelPromptResult.Success)?.text, "vision") }
+                    }
+                } else handler.post { applyGemmaQuickCartChoice(null, "screenshot unavailable") }
+            }
+        }
+    }
+
+    private fun applyGemmaQuickCartChoice(response: String?, source: String) {
+        if (!running || step != RunStep.WAIT_CATALOG) return
+        gemmaPlanningInFlight = false
+        gemmaHasGuidedRun = true
+        PocketQaSessionStore.record("model", "Gemma QuickCart decision ($source): ${response?.take(100)?.replace('\n', ' ') ?: "bounded fallback"}")
+        tapQuickCartAdd()
+    }
+
+    private fun tapQuickCartAdd() {
+        val root = rootInActiveWindow ?: return
+        val add = findByLabel(root, "ADD") ?: run { root.recycle(); return }
+        step = RunStep.WAIT_CART
+        if (consumeAction("tap", "ADD product")) add.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+        add.recycle(); root.recycle()
+        handler.postDelayed({ clickByPrefix("View Cart") }, 900)
     }
 
     /** Model-only exploration: no deterministic actions are run in this mode. */
@@ -644,6 +748,15 @@ class PocketQaAccessibilityService : AccessibilityService() {
         val node = findByLabel(root, label) ?: return
         node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
         node.recycle()
+    }
+
+    private fun clickByPrefix(prefix: String) {
+        if (!consumeAction("tap", prefix)) return
+        val root = rootInActiveWindow ?: return
+        val node = findByPrefix(root, prefix)
+        node?.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+        node?.recycle()
+        root.recycle()
     }
 
     private fun setText(node: AccessibilityNodeInfo, text: String) {

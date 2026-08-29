@@ -299,7 +299,14 @@ class MainActivity : Activity() {
             runOnUiThread {
                 if (selectedTarget?.packageName != target.packageName) return@runOnUiThread
                 if (binding == null) {
-                    repoStatus = "No repository attached to ${target.label} yet"
+                    TargetProfile.defaultRepositoryFor(target.packageName)?.let { default ->
+                        repoUrl = default.url
+                        repoRef = default.ref
+                        repoSubfolder = default.subfolder
+                        repoStatus = "QuickCart source pre-filled. Clone & index when you want source-grounded patches."
+                    } ?: run {
+                        repoStatus = "No repository attached to ${target.label} yet"
+                    }
                 } else {
                     val (request, corpus) = binding
                     repoUrl = request.url; repoRef = request.ref; repoSubfolder = request.subfolder; repoCorpus = corpus
