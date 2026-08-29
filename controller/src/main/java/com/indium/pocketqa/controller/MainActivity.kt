@@ -670,12 +670,15 @@ class MainActivity : Activity() {
 
     // --- SCREEN 4: AI DIAGNOSIS & DIFFER ---
     private fun renderDiagnosisTab(snapshot: SessionSnapshot) {
-        val finding = selectedFinding ?: snapshot.findings.firstOrNull() ?: BugFinding(
-            title = "Null check operator used on a null value",
-            evidence = "profile_screen.dart:142:35",
-            sourceKey = "profile_screen.dart",
-            recommendation = "Add null safety check"
-        )
+        val finding = selectedFinding ?: snapshot.findings.firstOrNull()
+        if (finding == null) {
+            contentContainer.addView(createAccentCard(
+                "No diagnosis yet",
+                "Run a test and select a detected issue. PocketQA never shows a sample patch as if it were a real result.",
+                borderAccent = Color.parseColor("#3B82F6"),
+            ))
+            return
+        }
 
         val diagnosis = KnownBugCatalog.diagnose(finding)
 
