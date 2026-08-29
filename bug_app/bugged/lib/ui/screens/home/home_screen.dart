@@ -55,20 +55,31 @@ class HomeScreen extends StatelessWidget {
                             ],
                           ),
                           const SizedBox(height: 4),
-                          const Row(
-                            children: [
-                              Icon(Icons.location_on, size: 14, color: QuickCartTheme.primaryGreen),
-                              SizedBox(width: 4),
-                              Text(
-                                'Indiranagar, Bengaluru • 15 mins',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
-                                  color: QuickCartTheme.textSecondary,
-                                ),
+                          // BUG 11: Missing HitTestBehavior.opaque causes only text to be clickable
+                          GestureDetector(
+                            onTap: () {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('Address selector tapped!')),
+                              );
+                            },
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 8.0), // Expands visual target
+                              child: const Row(
+                                children: [
+                                  Icon(Icons.location_on, size: 14, color: QuickCartTheme.primaryGreen),
+                                  SizedBox(width: 4),
+                                  Text(
+                                    'Indiranagar, Bengaluru • 15 mins',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                      color: QuickCartTheme.textSecondary,
+                                    ),
+                                  ),
+                                  Icon(Icons.keyboard_arrow_down, size: 16, color: QuickCartTheme.textSecondary),
+                                ],
                               ),
-                              Icon(Icons.keyboard_arrow_down, size: 16, color: QuickCartTheme.textSecondary),
-                            ],
+                            ),
                           ),
                         ],
                       ),

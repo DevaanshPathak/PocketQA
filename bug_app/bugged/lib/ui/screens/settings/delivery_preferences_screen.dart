@@ -13,9 +13,10 @@ class DeliveryPreferencesScreen extends StatefulWidget {
 
 class _DeliveryPreferencesScreenState extends State<DeliveryPreferencesScreen>
     with WidgetsBindingObserver {
-  String _selectedSlot = 'Morning (8 AM - 11 AM)';
-  bool _leaveAtDoor = true;
-  bool _contactless = false;
+  // BUG 10: State variables made static to simulate leaked shared state mutation.
+  static String _selectedSlot = 'Morning (8 AM - 11 AM)';
+  static bool _leaveAtDoor = true;
+  static bool _contactless = false;
   bool _isSaving = false;
   bool _isLoading = true;
   final TextEditingController _instructionsController = TextEditingController();
@@ -46,11 +47,11 @@ class _DeliveryPreferencesScreenState extends State<DeliveryPreferencesScreen>
       final prefs = doc?['deliveryPreferences'] as Map<String, dynamic>?;
       if (prefs != null && mounted) {
         setState(() {
-          _selectedSlot = prefs['timeSlot'] as String? ?? _selectedSlot;
-          _leaveAtDoor = prefs['leaveAtDoor'] as bool? ?? _leaveAtDoor;
-          _contactless = prefs['contactless'] as bool? ?? _contactless;
-          _instructionsController.text =
-              prefs['specialInstructions'] as String? ?? '';
+          // BUG 10: We purposefully do not overwrite the leaked state if it was mutated
+          // Usually we would sync with backend, but here the local mutation wins.
+          if (_instructionsController.text.isEmpty) {
+             _instructionsController.text = prefs['specialInstructions'] as String? ?? '';
+          }
         });
       }
     } catch (e) {

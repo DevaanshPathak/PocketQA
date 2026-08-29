@@ -1,3 +1,4 @@
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../../providers/product_provider.dart';
@@ -14,6 +15,9 @@ class SearchScreen extends StatefulWidget {
 
 class _SearchScreenState extends State<SearchScreen> {
   final _searchController = TextEditingController();
+  
+  // BUG 07: Cache the length to create out-of-bounds crash on filter
+  int _cachedLength = 0;
 
   @override
   void dispose() {
@@ -30,6 +34,9 @@ class _SearchScreenState extends State<SearchScreen> {
   Widget build(BuildContext context) {
     final productProvider = context.watch<ProductProvider>();
     final products = productProvider.filteredProducts;
+
+    // BUG 07: Only grow the cached length, never shrink it.
+    _cachedLength = max(_cachedLength, products.length);
 
     return Scaffold(
       appBar: AppBar(
@@ -85,8 +92,10 @@ class _SearchScreenState extends State<SearchScreen> {
                 crossAxisSpacing: 12,
                 mainAxisSpacing: 12,
               ),
-              itemCount: products.length,
+              // BUG 07: Use the cached length which might be larger than products.length
+              itemCount: _cachedLength,
               itemBuilder: (context, index) {
+                // Crash happens here if index >= products.length
                 final prod = products[index];
                 return ProductCard(
                   product: prod,

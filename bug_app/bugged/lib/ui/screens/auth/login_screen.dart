@@ -30,9 +30,11 @@ class _LoginScreenState extends State<LoginScreen> {
     final email = _emailController.text.trim();
     final password = _passwordController.text.trim();
 
-    if (email.isEmpty || password.isEmpty) {
+    // BUG 16: Authentication state validation gap.
+    // The form checks email validity but does not verify password presence before attempting submit.
+    if (email.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please fill all fields')),
+        const SnackBar(content: Text('Please provide a valid email address')),
       );
       return;
     }

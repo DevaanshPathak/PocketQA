@@ -19,6 +19,8 @@ class ProductProvider extends ChangeNotifier {
   List<ProductModel> _allProducts = [];
   String? _selectedCategoryId;
   String _searchQuery = '';
+  // BUG 02: Keep a separate search result state that gets updated asynchronously
+  List<ProductModel>? _staleSearchResults;
   bool _isLoading = false; // Always false — fallback loads synchronously.
 
   StreamSubscription<List<CategoryModel>>? _categorySub;
@@ -45,8 +47,9 @@ class ProductProvider extends ChangeNotifier {
     if (_selectedCategoryId != null && _selectedCategoryId!.isNotEmpty) {
       list = list.where((p) => p.categoryId == _selectedCategoryId).toList();
     }
+    // BUG 02: Instead of computing synchronously, return the asynchronous (potentially stale) result
     if (_searchQuery.isNotEmpty) {
-      list = _productRepository.searchProducts(list, _searchQuery);
+      return _staleSearchResults ?? [];
     }
     return list;
   }
@@ -56,9 +59,23 @@ class ProductProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  void setSearchQuery(String query) {
+  // BUG 02: Rapid search race condition
+  void setSearchQuery(String query) async {
     _searchQuery = query;
     notifyListeners();
+
+    if (query.isNotEmpty) {
+      // Simulate variable network delay (longer for shorter queries, etc.)
+      final delay = query.length % 2 == 0 ? 800 : 200;
+      await Future.delayed(Duration(milliseconds: delay));
+      
+      // Overwrite the results asynchronously WITHOUT checking if query == _searchQuery
+      _staleSearchResults = _productRepository.searchProducts(_allProducts, query);
+      notifyListeners();
+    } else {
+      _staleSearchResults = null;
+      notifyListeners();
+    }
   }
 
   /// Called by ChangeNotifierProxyProvider whenever the auth UID changes.

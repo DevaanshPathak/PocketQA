@@ -15,11 +15,32 @@ class CheckoutScreen extends StatefulWidget {
 class _CheckoutScreenState extends State<CheckoutScreen> {
   String _selectedPaymentMethod = 'UPI';
 
+  // BUG 03 & 13: Cached snapshot of the cart to create a stale state.
+  static List<CartItemModel>? _cachedCartSnapshot;
+  static double? _cachedTotalSnapshot;
+
+  @override
+  void initState() {
+    super.initState();
+    final cart = context.read<CartProvider>();
+    // BUG 03 & 13: If we have a cached snapshot, we reuse it instead of the current cart.
+    // If not, we take a snapshot now and keep reusing it forever.
+    if (_cachedCartSnapshot == null) {
+      _cachedCartSnapshot = List.from(cart.items);
+      _cachedTotalSnapshot = cart.totalAmount;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    // We intentionally watch the provider here so the rest of the app might think we update,
+    // but we use the stale _cachedCartSnapshot!
     final cart = context.watch<CartProvider>();
     final orderProvider = context.watch<OrderProvider>();
-    final totalPayable = cart.totalAmount;
+    
+    // BUG 03 & 13: Use stale data!
+    final cartItems = _cachedCartSnapshot ?? [];
+    final totalPayable = _cachedTotalSnapshot ?? 0.0;
 
     return Scaffold(
       appBar: AppBar(
@@ -158,7 +179,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                     ),
                     child: Column(
                       children: [
-                        for (final item in cart.items)
+                        for (final item in cartItems)
                           Padding(
                             padding: const EdgeInsets.symmetric(vertical: 4),
                             child: Row(
@@ -199,11 +220,11 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
               ],
             ),
             child: ElevatedButton(
-              onPressed: orderProvider.isPlacingOrder
-                  ? null
-                  : () async {
+              // BUG 12: Remove the orderProvider.isPlacingOrder guard.
+              // Allows double place-order submission.
+              onPressed: () async {
                       final orderId = await orderProvider.createOrder(
-                        cartItems: cart.items,
+                        cartItems: cartItems,
                         totalAmount: totalPayable,
                         deliveryAddress: 'Flat 402, Sunshine Apartments, Indiranagar, Bengaluru',
                         paymentMethod: _selectedPaymentMethod,
@@ -212,12 +233,11 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                       cart.clearCart();
 
                       if (mounted) {
-                        Navigator.pushAndRemoveUntil(
+                        Navigator.push(
                           context,
                           MaterialPageRoute(
                             builder: (_) => OrderConfirmationScreen(orderId: orderId),
                           ),
-                          (route) => route.isFirst,
                         );
                       }
                     },

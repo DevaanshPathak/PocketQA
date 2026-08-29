@@ -21,9 +21,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   void initState() {
     super.initState();
     final user = context.read<AuthProvider>().user;
-    _nameController = TextEditingController(text: user?.displayName.isNotEmpty == true ? user!.displayName : 'Sagar Mehta');
-    _emailController = TextEditingController(text: user?.email.isNotEmpty == true ? user!.email : 'sagar@example.com');
-    _phoneController = TextEditingController(text: user?.phoneNumber.isNotEmpty == true ? user!.phoneNumber : '+91 9876543210');
     // Initialize from stored photoUrl; null means no photo.
     final storedPhoto = user?.photoUrl ?? '';
     _selectedPhotoPath = storedPhoto.isNotEmpty ? storedPhoto : null;
@@ -94,6 +91,10 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     final bool photoWasCleared = _selectedPhotoPath == null &&
         (auth.user?.photoUrl.isNotEmpty ?? false);
 
+    // BUG 09: Add a delay and do NOT guard with an _isSaving flag. 
+    // This allows multiple simultaneous saves.
+    await Future.delayed(const Duration(milliseconds: 1500));
+
     await auth.updateProfile(
       displayName: newName,
       email: newEmail,
@@ -112,6 +113,12 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // BUG 08: Reinitializing controllers on every build wipes typed text if state changes (e.g. keyboard opens)
+    final user = context.read<AuthProvider>().user;
+    _nameController = TextEditingController(text: user?.displayName.isNotEmpty == true ? user!.displayName : 'Sagar Mehta');
+    _emailController = TextEditingController(text: user?.email.isNotEmpty == true ? user!.email : 'sagar@example.com');
+    _phoneController = TextEditingController(text: user?.phoneNumber.isNotEmpty == true ? user!.phoneNumber : '+91 9876543210');
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Edit Profile'),

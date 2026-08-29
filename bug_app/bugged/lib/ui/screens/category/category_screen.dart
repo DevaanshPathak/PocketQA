@@ -98,8 +98,10 @@ class CategoryScreen extends StatelessWidget {
                           crossAxisSpacing: 12,
                           mainAxisSpacing: 12,
                         ),
-                        itemCount: extendedProducts.length,
+                        // BUG 06: Final list item off-by-one boundary crash
+                        itemCount: extendedProducts.length + 1,
                         itemBuilder: (context, index) {
+                          // Crash occurs here when index == extendedProducts.length
                           final prod = extendedProducts[index];
 
                           return ProductCard(

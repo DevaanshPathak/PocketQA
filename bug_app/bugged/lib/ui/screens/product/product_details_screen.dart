@@ -5,7 +5,7 @@ import '../../../providers/cart_provider.dart';
 import '../../theme.dart';
 import '../cart/cart_screen.dart';
 
-class ProductDetailsScreen extends StatelessWidget {
+class ProductDetailsScreen extends StatefulWidget {
   final ProductModel product;
 
   const ProductDetailsScreen({
@@ -14,17 +14,46 @@ class ProductDetailsScreen extends StatelessWidget {
   });
 
   @override
+  State<ProductDetailsScreen> createState() => _ProductDetailsScreenState();
+}
+
+class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
+  // BUG 04: Shared state across all instances
+  static ProductModel? _currentViewedProduct;
+
+  @override
+  void initState() {
+    super.initState();
+    _currentViewedProduct = widget.product;
+    _simulateAsyncLoad();
+  }
+
+  void _simulateAsyncLoad() async {
+    final savedProduct = widget.product;
+    // BUG 04: Un-cancelled async delay
+    await Future.delayed(const Duration(milliseconds: 1500));
+    // Overwrite the global state with the older product, even if navigation changed!
+    if (mounted) {
+      setState(() {
+        _currentViewedProduct = savedProduct;
+      });
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    // Render the (potentially stale) global product
+    final productToDisplay = _currentViewedProduct ?? widget.product;
     final cart = context.watch<CartProvider>();
     final cartItem = cart.items.firstWhere(
-      (item) => item.productId == product.id,
-      orElse: () => product.toCartItem(quantity: 0),
+      (item) => item.productId == productToDisplay.id,
+      orElse: () => productToDisplay.toCartItem(quantity: 0),
     );
     final currentQty = cartItem.quantity;
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(product.brand),
+        title: Text(productToDisplay.brand),
         actions: [
           IconButton(
             icon: const Icon(Icons.share_outlined),
@@ -45,7 +74,7 @@ class ProductDetailsScreen extends StatelessWidget {
                     height: 260,
                     color: QuickCartTheme.surfaceContainerLow,
                     child: Image.network(
-                      product.imageUrl,
+                      productToDisplay.imageUrl,
                       fit: BoxFit.cover,
                       errorBuilder: (_, __, ___) => const Center(
                         child: Icon(Icons.shopping_basket_outlined, size: 80, color: QuickCartTheme.textLight),
@@ -60,7 +89,7 @@ class ProductDetailsScreen extends StatelessWidget {
                       children: [
                         // Brand & Name
                         Text(
-                          product.brand,
+                          productToDisplay.brand,
                           style: const TextStyle(
                             fontSize: 14,
                             color: QuickCartTheme.primaryGreen,
@@ -69,7 +98,7 @@ class ProductDetailsScreen extends StatelessWidget {
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          product.name,
+                          productToDisplay.name,
                           style: const TextStyle(
                             fontSize: 22,
                             fontWeight: FontWeight.bold,
@@ -78,7 +107,7 @@ class ProductDetailsScreen extends StatelessWidget {
                         ),
                         const SizedBox(height: 6),
                         Text(
-                          product.quantityLabel,
+                          productToDisplay.quantityLabel,
                           style: const TextStyle(
                             fontSize: 14,
                             color: QuickCartTheme.textSecondary,
@@ -90,7 +119,7 @@ class ProductDetailsScreen extends StatelessWidget {
                         Row(
                           children: [
                             Text(
-                              '₹${product.price.toStringAsFixed(0)}',
+                              '₹${productToDisplay.price.toStringAsFixed(0)}',
                               style: const TextStyle(
                                 fontSize: 26,
                                 fontWeight: FontWeight.bold,
@@ -98,9 +127,9 @@ class ProductDetailsScreen extends StatelessWidget {
                               ),
                             ),
                             const SizedBox(width: 12),
-                            if (product.originalPrice > product.price) ...[
+                            if (productToDisplay.originalPrice > productToDisplay.price) ...[
                               Text(
-                                '₹${product.originalPrice.toStringAsFixed(0)}',
+                                '₹${productToDisplay.originalPrice.toStringAsFixed(0)}',
                                 style: const TextStyle(
                                   fontSize: 16,
                                   color: QuickCartTheme.textLight,
@@ -115,7 +144,7 @@ class ProductDetailsScreen extends StatelessWidget {
                                   borderRadius: BorderRadius.circular(6),
                                 ),
                                 child: Text(
-                                  '${product.discountPercentage}% OFF',
+                                  '${productToDisplay.discountPercentage}% OFF',
                                   style: const TextStyle(
                                     color: Colors.white,
                                     fontSize: 12,
@@ -166,7 +195,7 @@ class ProductDetailsScreen extends StatelessWidget {
                         ),
                         const SizedBox(height: 8),
                         Text(
-                          product.description,
+                          productToDisplay.description,
                           style: const TextStyle(
                             fontSize: 14,
                             color: QuickCartTheme.textSecondary,
@@ -199,10 +228,10 @@ class ProductDetailsScreen extends StatelessWidget {
                 Expanded(
                   child: OutlinedButton(
                     onPressed: () {
-                      cart.addItem(product);
+                      cart.addItem(productToDisplay);
                       ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(
-                          content: Text('Added ${product.name} to cart'),
+                          content: Text('Added ${productToDisplay.name} to cart'),
                           duration: const Duration(seconds: 1),
                         ),
                       );
@@ -215,7 +244,7 @@ class ProductDetailsScreen extends StatelessWidget {
                   child: ElevatedButton(
                     onPressed: () {
                       if (currentQty == 0) {
-                        cart.addItem(product);
+                        cart.addItem(productToDisplay);
                       }
                       Navigator.push(
                         context,

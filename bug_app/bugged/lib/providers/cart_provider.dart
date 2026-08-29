@@ -65,7 +65,10 @@ class CartProvider extends ChangeNotifier {
   Future<void> incrementItem(String productId) async {
     final existingIndex = _items.indexWhere((i) => i.productId == productId);
     if (existingIndex != -1) {
-      await updateQuantity(productId, _items[existingIndex].quantity + 1);
+      final currentQty = _items[existingIndex].quantity;
+      // BUG 01: Artificial delay to induce race condition with stale state
+      await Future.delayed(const Duration(milliseconds: 600));
+      await updateQuantity(productId, currentQty + 1);
     }
   }
 
@@ -73,7 +76,10 @@ class CartProvider extends ChangeNotifier {
     final existingIndex = _items.indexWhere((i) => i.productId == productId);
     if (existingIndex != -1) {
       final currentQty = _items[existingIndex].quantity;
-      if (currentQty > 1) {
+      // BUG 05: Allows quantity to reach 0 instead of > 1
+      if (currentQty > 0) {
+        // BUG 01: Artificial delay to induce race condition with stale state
+        await Future.delayed(const Duration(milliseconds: 600));
         await updateQuantity(productId, currentQty - 1);
       } else {
         await removeFromCart(productId);
@@ -84,11 +90,9 @@ class CartProvider extends ChangeNotifier {
   Future<void> updateQuantity(String productId, int newQuantity) async {
     final existingIndex = _items.indexWhere((i) => i.productId == productId);
     if (existingIndex != -1) {
-      if (newQuantity <= 0) {
-        _items.removeAt(existingIndex);
-      } else {
-        _items[existingIndex] = _items[existingIndex].copyWith(quantity: newQuantity);
-      }
+      // BUG 05: Removed the `newQuantity <= 0` removal check.
+      // Items will stay in cart with 0 or negative quantity.
+      _items[existingIndex] = _items[existingIndex].copyWith(quantity: newQuantity);
       notifyListeners();
     }
 
