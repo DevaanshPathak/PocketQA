@@ -14,9 +14,10 @@ object GemmaActionPlanner {
     """.trimIndent()
 
     fun chooseLabel(response: String, candidates: List<String>): String? {
-        val proposed = response.lineSequence()
-            .firstOrNull { it.trim().startsWith("TAP:", ignoreCase = true) }
-            ?.substringAfter(':')
+        val proposed = Regex("(?i)TAP\\s*:\\s*[`\\\"]?([^`\\\"\\r\\n]+)")
+            .find(response)
+            ?.groupValues
+            ?.getOrNull(1)
             ?.trim()
             ?: return null
         return candidates.firstOrNull { it.equals(proposed, ignoreCase = true) }

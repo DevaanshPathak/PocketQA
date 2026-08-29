@@ -21,6 +21,7 @@ class PocketQaAccessibilityService : AccessibilityService() {
     private var gemmaPlanningInFlight = false
     private var gemmaHasGuidedRun = false
     private val autonomousVisitedLabels = mutableSetOf<String>()
+    private var autonomousInitialProbeScheduled = false
     private lateinit var modelRuntime: LiteRtModelRuntime
     private val timeoutRunnable = Runnable {
         if (running) failRun("Safety timeout: exploration stopped after 30 seconds")
@@ -49,6 +50,7 @@ class PocketQaAccessibilityService : AccessibilityService() {
         gemmaPlanningInFlight = false
         gemmaHasGuidedRun = false
         autonomousVisitedLabels.clear()
+        autonomousInitialProbeScheduled = false
         targetPackage = packageName
         step = if (packageName == DEFAULT_TARGET_PACKAGE) RunStep.WAIT_CATALOG else RunStep.WAIT_GENERIC
         PocketQaSessionStore.start(goal, mode)
@@ -96,6 +98,19 @@ class PocketQaAccessibilityService : AccessibilityService() {
             .filterNot { it in autonomousVisitedLabels }
             .take(MAX_MODEL_CANDIDATES)
         if (candidates.isEmpty()) {
+            if (!autonomousInitialProbeScheduled && actionCount == 0) {
+                autonomousInitialProbeScheduled = true
+                gemmaPlanningInFlight = true
+                PocketQaSessionStore.record("wait", "Waiting for the target app's first actionable semantics frame")
+                testingOverlay.show("PocketQA AI\nWaiting for app controls…")
+                handler.postDelayed({
+                    if (!running || explorationMode != ExplorationMode.GEMMA_AUTONOMOUS) return@postDelayed
+                    gemmaPlanningInFlight = false
+                    val latest = rootInActiveWindow ?: return@postDelayed
+                    handleGemmaAutonomous(latest, latest.toSnapshot())
+                }, AUTONOMOUS_INITIAL_WAIT_MS)
+                return
+            }
             PocketQaSessionStore.record("model", "Gemma autonomous run stopped: no new visible actions")
             finishRun()
             return
@@ -473,6 +488,7 @@ class PocketQaAccessibilityService : AccessibilityService() {
         private const val MAX_ACTIONS = 20
         private const val AUTONOMOUS_MAX_ACTIONS = 8
         private const val MAX_MODEL_CANDIDATES = 10
+        private const val AUTONOMOUS_INITIAL_WAIT_MS = 2_500L
         private const val RUN_TIMEOUT_MS = 30_000L
         private const val CATALOG_LOAD_WINDOW_MS = 3_000L
     }

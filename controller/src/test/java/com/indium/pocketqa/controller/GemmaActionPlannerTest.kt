@@ -24,4 +24,14 @@ class GemmaActionPlannerTest {
 
         assertNull(choice)
     }
+
+    @Test
+    fun `planner accepts a quoted model action`() {
+        val choice = GemmaActionPlanner.chooseLabel(
+            response = "I choose TAP: `Add Organic Bananas`",
+            candidates = listOf("Add Organic Bananas", "Shopping cart"),
+        )
+
+        assertEquals("Add Organic Bananas", choice)
+    }
 }
