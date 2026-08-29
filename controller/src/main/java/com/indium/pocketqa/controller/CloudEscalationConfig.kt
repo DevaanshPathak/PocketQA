@@ -13,11 +13,12 @@ data class CloudEscalationConfig(val enabled: Boolean, val apiKey: String, val m
         private const val MODEL = "openrouter_model"
         fun load(context: Context): CloudEscalationConfig {
             val p = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            return CloudEscalationConfig(p.getBoolean(ENABLED, false), p.getString(KEY, "").orEmpty(), p.getString(MODEL, "openai/gpt-4.1-mini").orEmpty())
+            return CloudEscalationConfig(p.getBoolean(ENABLED, false), SecretStore(context).get(KEY), p.getString(MODEL, "openai/gpt-4.1-mini").orEmpty())
         }
         fun save(context: Context, config: CloudEscalationConfig) {
             context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-                .putBoolean(ENABLED, config.enabled).putString(KEY, config.apiKey).putString(MODEL, config.model).apply()
+                .putBoolean(ENABLED, config.enabled).putString(MODEL, config.model).apply()
+            SecretStore(context).put(KEY, config.apiKey)
         }
     }
 }

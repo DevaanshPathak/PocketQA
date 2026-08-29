@@ -1,11 +1,12 @@
-# PocketQA Accessibility Feasibility Proof
+# PocketQA Android MVP
 
-This repository proves one claim only: Android `AccessibilityService` can read the
-Semantics nodes produced by a real Flutter grocery app and act on them.
+PocketQA is an Android QA controller that drives another installed app through
+`AccessibilityService`, records a structured trace, detects known UI failures, and
+generates source-grounded patches with an on-device Gemma model. Runtime testing and
+local patching work without a laptop or network.
 
 - `bug_app/` is the actual five-bug PocketQA testbed.
-- `controller/` is the PocketQA native Kotlin prototype. Its accessibility service
-  launches the testbed, executes five deterministic checks, and renders a report.
+- `controller/` is the native Kotlin controller and local inference app.
 
 The **Open buggy app and run 5 tests** button checks:
 
@@ -53,6 +54,40 @@ adb install -r bug_app\build\app\outputs\flutter-apk\app-debug.apk
 adb install -r controller\build\outputs\apk\debug\controller-debug.apk
 ```
 
+## Repository-grounded patches
+
+In PocketQA's Scanner tab, enter a credential-free HTTPS Git repository URL, a
+branch or tag, and the relative subfolder containing the target app (for example,
+`apps/mobile`). For a private repository, enter a token in the separate masked field.
+The token is used for that clone only and is not persisted. The shallow clone,
+selected subfolder, and lexical RAG index stay in PocketQA's private app storage.
+The last successful selection is restored when the app restarts.
+
+From a finding, open Diagnosis and choose **Generate patch from indexed repo**.
+PocketQA retrieves relevant source chunks, classifies prompt size, and either:
+
+- uses the installed Gemma LiteRT model for a small grounded change;
+- uses OpenRouter for a larger change only when the user has enabled BYOK; or
+- abstains when the evidence or configured runtime is insufficient.
+
+Generated text is exposed for save/share only after unified-diff paths are checked
+against the indexed source manifest. OpenRouter keys are encrypted with Android
+Keystore and can be removed with **Clear BYOK key**. Cloud escalation is optional;
+when enabled, the finding, trace, and retrieved source context leave the device.
+
+## Custom MCP source tools
+
+Create an allowlisted corpus, then run the dependency-free stdio MCP server:
+
+```powershell
+.\scripts\prepare-repo-corpus.ps1 -Repo D:\path\to\repo -OutputDir D:\PocketQA-corpus
+python .\scripts\repo_mcp_server.py --corpus D:\PocketQA-corpus
+```
+
+The server exposes `search_source`, `read_source`, and `validate_patch`. It only
+reads files listed in the generated manifest and rejects path traversal. Configure
+your MCP client to launch the command above over stdio.
+
 ## 30-second recording script
 
 1. Open PocketQA and enable **PocketQA Semantics Reader** if needed.
@@ -63,8 +98,10 @@ adb install -r controller\build\outputs\apk\debug\controller-debug.apk
 
 To repeat, close the system ANR dialog if it appears, then press the test button again.
 
-## Intentional scope
+## Current MVP boundaries
 
-There is no model, screenshot/VLM path, crash detector, backend, or patch generation.
-The application proof isolates the riskiest premise instead of implying an unfinished
-end-to-end product.
+PocketQA generates and exports a reviewed `.diff`; it does not automatically modify,
+commit, or push the cloned repository. Guided Gemma navigation remains bounded and
+uses deterministic coverage for demo reliability. OpenRouter escalation requires a
+network connection and explicit BYOK opt-in; normal test execution and local Gemma
+diagnosis remain on-device.

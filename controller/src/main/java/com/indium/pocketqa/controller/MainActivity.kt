@@ -8,11 +8,14 @@ import android.graphics.Typeface
 import android.os.Bundle
 import android.provider.Settings
 import android.text.SpannableStringBuilder
+import android.text.InputType
 import android.text.style.ForegroundColorSpan
 import android.view.View
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import android.widget.Button
+import android.widget.CheckBox
+import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.Spinner
@@ -36,7 +39,14 @@ class MainActivity : Activity() {
     private var selectedFinding: BugFinding? = null
     private var gemmaDiagnosis: String? = null
     private var gemmaDiagnosisStatus: String? = null
+    private var generatedPatch: String? = null
     private var diagnosisMode = DiagnosisMode.DETERMINISTIC
+    private var repoUrl = ""
+    private var repoRef = "main"
+    private var repoSubfolder = ""
+    private var repoStatus = "No repository indexed"
+    private var repoCorpus: RepoCorpus? = null
+    private lateinit var cloudConfig: CloudEscalationConfig
 
     private enum class Tab {
         SCANNER, MONITOR, DIAGNOSIS, ANALYTICS
@@ -57,6 +67,7 @@ class MainActivity : Activity() {
         setContentView(R.layout.activity_main)
 
         modelRuntime = LiteRtModelRuntime(this)
+        cloudConfig = CloudEscalationConfig.load(this)
         contentContainer = findViewById(R.id.main_content_container)
         tvGpuStatusBadge = findViewById(R.id.tv_gpu_status_badge)
         tvOfflineBadge = findViewById(R.id.tv_offline_badge)
@@ -83,6 +94,14 @@ class MainActivity : Activity() {
                 render(snapshot)
             }
         }
+        Thread {
+            RepoCloneManager(this).loadLast()?.let { (request, corpus) ->
+                repoUrl = request.url; repoRef = request.ref; repoSubfolder = request.subfolder
+                repoCorpus = corpus
+                repoStatus = "Indexed ${corpus.chunks.size} chunks at ${corpus.revision.take(10)}"
+                runOnUiThread { render(PocketQaSessionStore.snapshot()) }
+            }
+        }.start()
     }
 
     private fun switchTab(tab: Tab, forceRender: Boolean = true) {
@@ -200,10 +219,67 @@ class MainActivity : Activity() {
         modelCard.addView(tvStatus)
         contentContainer.addView(modelCard)
 
+        renderRepositorySettings()
+
         snapshot.error?.let { err ->
             val errCard = createAccentCard("Run Notice", err, borderAccent = getColor(R.color.accent_rose))
             contentContainer.addView(errCard)
         }
+    }
+
+    private fun renderRepositorySettings() {
+        val repoCard = createCard("Source Repository", "Clone an HTTPS Git repository and index only the selected app subfolder")
+        val urlInput = createInput("Repository URL", repoUrl)
+        val refInput = createInput("Branch / tag", repoRef)
+        val folderInput = createInput("Source subfolder (for example apps/mobile)", repoSubfolder)
+        val tokenInput = createInput("Private repository token (optional)", "", secret = true)
+        repoCard.addView(urlInput); repoCard.addView(refInput); repoCard.addView(folderInput); repoCard.addView(tokenInput)
+        repoCard.addView(createPrimaryButton("CLONE & INDEX SOURCE") {
+            repoUrl = urlInput.text.toString().trim()
+            repoRef = refInput.text.toString().trim().ifBlank { "main" }
+            repoSubfolder = folderInput.text.toString().trim()
+            val token = tokenInput.text.toString()
+            repoStatus = "Cloning and indexing locally…"
+            render(PocketQaSessionStore.snapshot())
+            Thread {
+                runCatching { RepoCloneManager(this).cloneAndIndex(RepoRequest(repoUrl, repoRef, repoSubfolder, token)) }
+                    .onSuccess { corpus -> repoCorpus = corpus; repoStatus = "Indexed ${corpus.chunks.size} chunks at ${corpus.revision.take(10)}" }
+                    .onFailure { error -> repoStatus = "Repository setup failed: ${error.message ?: error.javaClass.simpleName}" }
+                runOnUiThread { render(PocketQaSessionStore.snapshot()) }
+            }.start()
+        })
+        repoCard.addView(createTextView(repoStatus, color = getColor(R.color.text_secondary), textSize = 12f))
+        contentContainer.addView(repoCard)
+
+        val cloudCard = createCard("Large-Bug Cloud Escalation", "Optional OpenRouter BYOK; used only when the local classifier exceeds device limits")
+        val enabled = CheckBox(this).apply { text = "Enable large-bug escalation"; isChecked = cloudConfig.enabled; setTextColor(getColor(R.color.text_primary)) }
+        val keyInput = createInput("OpenRouter API key (blank keeps saved key)", "", secret = true)
+        val modelInput = createInput("OpenRouter model", cloudConfig.model)
+        cloudCard.addView(enabled); cloudCard.addView(keyInput); cloudCard.addView(modelInput)
+        cloudCard.addView(createSecondaryButton("SAVE BYOK SETTINGS") {
+            val enteredKey = keyInput.text.toString().trim()
+            cloudConfig = CloudEscalationConfig(enabled.isChecked, enteredKey.ifBlank { cloudConfig.apiKey }, modelInput.text.toString().trim())
+            CloudEscalationConfig.save(this, cloudConfig)
+            keyInput.setText("")
+            modelStatus = if (cloudConfig.ready) "Large-bug escalation configured" else "Cloud escalation disabled or key missing"
+            render(PocketQaSessionStore.snapshot())
+        })
+        cloudCard.addView(createSecondaryButton("CLEAR BYOK KEY") {
+            cloudConfig = CloudEscalationConfig(false, "", modelInput.text.toString().trim())
+            CloudEscalationConfig.save(this, cloudConfig)
+            modelStatus = "Cloud escalation key removed"
+            render(PocketQaSessionStore.snapshot())
+        })
+        contentContainer.addView(cloudCard)
+    }
+
+    private fun createInput(hint: String, value: String, secret: Boolean = false): EditText = EditText(this).apply {
+        this.hint = hint
+        setHintTextColor(getColor(R.color.text_muted))
+        setTextColor(getColor(R.color.text_primary))
+        setText(value)
+        inputType = if (secret) InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD else InputType.TYPE_CLASS_TEXT
+        layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
     }
 
     // --- TAB 2: LIVE MONITOR ---
@@ -343,6 +419,22 @@ class MainActivity : Activity() {
             modeCard.addView(btnRunGemma)
         }
         contentContainer.addView(modeCard)
+
+        val routedCard = createCard("Repository-Grounded Patch", "Local RAG → size classifier → Gemma or configured OpenRouter escalation")
+        routedCard.addView(createSecondaryButton("GENERATE PATCH FROM INDEXED REPO") { runRoutedPatch(finding) })
+        gemmaDiagnosisStatus?.let { routedCard.addView(createTextView(it, color = getColor(R.color.accent_indigo), textSize = 12f)) }
+        generatedPatch?.let { diff ->
+            routedCard.addView(createDiffBlock(diff))
+            routedCard.addView(createPrimaryButton("SAVE & SHARE GENERATED PATCH") {
+                val patch = PatchWriter.save(this, diff)
+                val uri = PatchWriter.uri(this, patch)
+                startActivity(Intent(Intent.ACTION_SEND).apply {
+                    type = "text/x-diff"; putExtra(Intent.EXTRA_STREAM, uri)
+                    clipData = ClipData.newRawUri("PocketQA patch", uri); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                })
+            })
+        }
+        contentContainer.addView(routedCard)
 
         // Root Cause & Reproduction Steps Card
         val causeCard = createCard("Root Cause & Reproduction", "Verified analysis breakdown")
@@ -628,6 +720,58 @@ class MainActivity : Activity() {
                 }
             }
         } }
+    }
+
+    private fun runRoutedPatch(finding: BugFinding) {
+        val corpus = repoCorpus ?: run {
+            gemmaDiagnosisStatus = "Clone and index a source repository first."
+            render(PocketQaSessionStore.snapshot()); return
+        }
+        val chunks = SourceRagIndex(corpus.chunks).search("${finding.title} ${finding.evidence}", 8)
+        if (chunks.isEmpty()) {
+            gemmaDiagnosisStatus = "Local RAG found no relevant source chunks; patch generation abstained."
+            render(PocketQaSessionStore.snapshot()); return
+        }
+        val route = BugRouter.route(chunks.sumOf { it.text.length }, chunks.map { it.sourceKey }.distinct().size, .8, cloudConfig.ready)
+        val prompt = DiagnosisPrompt.patch(finding, chunks, PocketQaSessionStore.snapshot().actions)
+        generatedPatch = null
+        gemmaDiagnosisStatus = "Route: $route. Generating a source-grounded patch…"
+        render(PocketQaSessionStore.snapshot())
+        when (route) {
+            PatchRoute.LOCAL_GEMMA -> modelRuntime.initialize { load ->
+                if (load !is ModelLoadResult.Ready) return@initialize finishRoutedPatch(null, "Local Gemma unavailable")
+                modelRuntime.runSmokePrompt(prompt) { result ->
+                    when (result) {
+                        is ModelPromptResult.Success -> finishRoutedPatch(result.text, null)
+                        is ModelPromptResult.Failed -> finishRoutedPatch(null, result.message)
+                    }
+                }
+            }
+            PatchRoute.OPENROUTER -> Thread {
+                when (val result = OpenRouterClient().generate(cloudConfig, prompt)) {
+                    is CloudPatchResult.Success -> finishRoutedPatch(result.text, null)
+                    is CloudPatchResult.Failed -> finishRoutedPatch(null, result.message)
+                }
+            }.start()
+            PatchRoute.NEEDS_CONFIGURATION -> finishRoutedPatch(null, "Bug exceeds local limits; enable BYOK cloud escalation")
+        }
+    }
+
+    private fun finishRoutedPatch(raw: String?, failure: String?) = runOnUiThread {
+        if (raw == null) {
+            gemmaDiagnosisStatus = "Patch generation failed: $failure"
+        } else if (raw.trimStart().startsWith("ABSTAIN:")) {
+            gemmaDiagnosisStatus = raw.trim()
+        } else {
+            val diff = raw.replace("```diff", "").replace("```", "").trim()
+            val allowed = repoCorpus?.chunks?.map { it.sourceKey }?.toSet().orEmpty()
+            val validation = PatchPolicy.validate(diff, allowed)
+            if (validation.valid) {
+                generatedPatch = diff
+                gemmaDiagnosisStatus = "Validated source-grounded patch ready for review"
+            } else gemmaDiagnosisStatus = "Rejected model patch: ${validation.reason}"
+        }
+        render(PocketQaSessionStore.snapshot())
     }
 
     override fun onDestroy() {

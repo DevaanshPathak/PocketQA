@@ -8,3 +8,5 @@ local.properties
 model_artifacts/
 *.log
 *.litertlm
+__pycache__/
+*.pyc

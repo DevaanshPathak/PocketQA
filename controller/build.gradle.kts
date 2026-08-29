@@ -43,5 +43,6 @@ tasks.named("preBuild").configure { dependsOn(syncPocketQaSourceCorpus) }
 dependencies {
     implementation("androidx.core:core-ktx:1.17.0")
     implementation("com.google.ai.edge.litertlm:litertlm-android:latest.release")
+    implementation("org.eclipse.jgit:org.eclipse.jgit:7.7.1.202607240634-r")
     testImplementation("junit:junit:4.13.2")
 }
