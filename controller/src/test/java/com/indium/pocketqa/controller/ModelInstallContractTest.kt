@@ -17,4 +17,10 @@ class ModelInstallContractTest {
         )
         assertTrue(ModelInstallContract.deviceRelativePath.startsWith("models/"))
     }
+
+    @Test
+    fun `full E4B artifact is the required vision model`() {
+        assertEquals("gemma-4-E4B-it.litertlm", ModelInstallContract.visionFileName)
+        assertTrue(ModelInstallContract.visionFileName.endsWith(".litertlm"))
+    }
 }

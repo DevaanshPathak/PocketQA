@@ -15,8 +15,9 @@ if (-not (Test-Path -LiteralPath $adb)) { throw "adb was not found at $adb" }
 $deviceArgs = @()
 if ($Serial) { $deviceArgs = @("-s", $Serial) }
 $package = "com.indium.pocketqa.controller"
-$stagingPath = "/data/local/tmp/gemma-4-E4B-it-gpu.litertlm"
-$targetPath = "files/models/gemma-4-E4B-it-gpu.litertlm"
+$modelName = Split-Path -Leaf $resolvedModel
+$stagingPath = "/data/local/tmp/$modelName"
+$targetPath = "files/models/$modelName"
 & $adb @deviceArgs push $resolvedModel $stagingPath
 if ($LASTEXITCODE -ne 0) { throw "Model transfer failed" }
 & $adb @deviceArgs shell run-as $package mkdir -p files/models

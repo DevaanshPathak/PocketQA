@@ -586,7 +586,7 @@ class PocketQaAccessibilityService : AccessibilityService() {
                             handler.post { recoverFromVisualFailure("Model unavailable for visual reasoning") }
                             return@initialize
                         }
-                        modelRuntime.runSmokePrompt(prompt) { result ->
+                        modelRuntime.runVisionPrompt(captureResult.file, prompt) { result ->
                             handler.post {
                                 visualFallbackInFlight = false
                                 val response = (result as? ModelPromptResult.Success)?.text.orEmpty()

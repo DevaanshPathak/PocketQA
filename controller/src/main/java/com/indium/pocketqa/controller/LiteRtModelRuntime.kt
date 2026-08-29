@@ -8,6 +8,8 @@ import com.google.ai.edge.litertlm.EngineConfig
 import com.google.ai.edge.litertlm.ExperimentalApi
 import com.google.ai.edge.litertlm.ExperimentalFlags
 import com.google.ai.edge.litertlm.Content
+import com.google.ai.edge.litertlm.Contents
+import com.google.ai.edge.litertlm.Message
 import com.google.ai.edge.litertlm.benchmark
 import java.io.File
 import java.lang.reflect.InvocationTargetException
@@ -111,6 +113,43 @@ class LiteRtModelRuntime(context: Context) : AutoCloseable {
                         elapsedMs = (System.nanoTime() - startedAt) / 1_000_000,
                     )
                 },
+                onFailure = { ModelPromptResult.Failed(it.describeRootCause()) },
+            )
+            onResult(result)
+        }
+    }
+
+    /** Sends a real screenshot plus text instruction to the multimodal E4B artifact. */
+    fun runVisionPrompt(imageFile: File, prompt: String, onResult: (ModelPromptResult) -> Unit) {
+        executor.execute {
+            val activeEngine = engine
+            if (activeEngine == null || !activeEngine.isInitialized()) {
+                onResult(ModelPromptResult.Failed("Model is not initialized"))
+                return@execute
+            }
+            if (!ModelInstallContract.supportsVision(appContext)) {
+                onResult(ModelPromptResult.Failed("Vision artifact missing; install ${ModelInstallContract.visionFileName}"))
+                return@execute
+            }
+            if (!imageFile.isFile || imageFile.length() == 0L) {
+                onResult(ModelPromptResult.Failed("Screenshot file is unavailable"))
+                return@execute
+            }
+            val startedAt = System.nanoTime()
+            val result = runCatching {
+                activeEngine.createConversation().use { conversation ->
+                    val contents = Contents.of(
+                        Content.ImageFile(imageFile.absolutePath),
+                        Content.Text(prompt),
+                    )
+                    conversation.sendMessage(Message.user(contents))
+                        .contents
+                        .contents
+                        .filterIsInstance<Content.Text>()
+                        .joinToString("") { it.text }
+                }
+            }.fold(
+                onSuccess = { text -> ModelPromptResult.Success(text, (System.nanoTime() - startedAt) / 1_000_000) },
                 onFailure = { ModelPromptResult.Failed(it.describeRootCause()) },
             )
             onResult(result)
