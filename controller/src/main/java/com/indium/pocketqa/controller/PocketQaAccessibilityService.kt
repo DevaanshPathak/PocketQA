@@ -26,6 +26,7 @@ class PocketQaAccessibilityService : AccessibilityService() {
     private var autonomousLastFingerprint: String? = null
     private var autonomousLastAction: String? = null
     private val autonomousCoverage = mutableSetOf<String>()
+    private val explorationGraph = ExplorationGraph()
     private var autonomousInitialProbeScheduled = false
     private var visualFallbackAttempts = 0
     private var visualFallbackInFlight = false
@@ -63,6 +64,7 @@ class PocketQaAccessibilityService : AccessibilityService() {
         autonomousLastFingerprint = null
         autonomousLastAction = null
         autonomousCoverage.clear()
+        explorationGraph.clear()
         autonomousInitialProbeScheduled = false
         visualFallbackAttempts = 0
         visualFallbackInFlight = false
@@ -112,15 +114,17 @@ class PocketQaAccessibilityService : AccessibilityService() {
     /** Model-only exploration: no deterministic actions are run in this mode. */
     private fun handleGemmaAutonomous(root: AccessibilityNodeInfo, snapshot: SemanticNode) {
         if (gemmaPlanningInFlight) return
-        val candidates = clickableLabels(root)
+        val visibleActions = clickableLabels(root)
             .filterNot { it in SYSTEM_NAVIGATION_LABELS }
+        val stateKey = explorationGraph.fingerprint(snapshot, visibleActions)
+        val candidates = explorationGraph.untried(stateKey, visibleActions)
             .filterNot { label ->
                 label in autonomousVisitedLabels &&
                     (label !in AUTONOMOUS_REVISITABLE_LABELS ||
                         (autonomousLabelActionCounts[label] ?: 0) >= MAX_REPEATED_LABEL_ACTIONS)
             }
             .take(MAX_MODEL_CANDIDATES)
-        val fingerprint = (snapshot.labels() + candidates).joinToString("|").hashCode().toString()
+        val fingerprint = stateKey
         updateAutonomousCoverage(snapshot, autonomousLastAction)
         val screenChanged = autonomousLastFingerprint?.let { it != fingerprint }
         autonomousLastFingerprint = fingerprint
@@ -321,6 +325,7 @@ class PocketQaAccessibilityService : AccessibilityService() {
             return
         }
         autonomousVisitedLabels += label
+        explorationGraph.record(autonomousLastFingerprint ?: "unknown", label)
         autonomousLabelActionCounts[label] = (autonomousLabelActionCounts[label] ?: 0) + 1
         autonomousLastAction = "tap $label"
         PocketQaSessionStore.record("model", "Gemma selected: $label")
