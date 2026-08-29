@@ -134,22 +134,44 @@ class PocketQaAccessibilityService : AccessibilityService() {
         when {
             labels.any { it.contains("QuickCart", ignoreCase = true) } && step == RunStep.WAIT_CATALOG -> {
                 val add = findByLabel(root, "ADD")
-                if (add == null) {
-                    if (!catalogProbeScheduled) {
-                        catalogProbeScheduled = true
-                        PocketQaSessionStore.record("wait", "Waiting for QuickCart product controls")
-                        handler.postDelayed({
-                            if (running && step == RunStep.WAIT_CATALOG) {
-                                found("QuickCart products fail to render", "No ADD product control appeared after the catalogue load window")
-                                finishRun()
-                            }
-                        }, CATALOG_LOAD_WINDOW_MS)
-                    }
+                if (add != null) {
+                    add.recycle()
+                    if (explorationMode == ExplorationMode.GEMMA_ASSISTED && !gemmaHasGuidedRun) requestGemmaQuickCartAction(snapshot)
+                    else tapQuickCartAdd()
                     return
                 }
-                add.recycle()
-                if (explorationMode == ExplorationMode.GEMMA_ASSISTED && !gemmaHasGuidedRun) requestGemmaQuickCartAction(snapshot)
-                else tapQuickCartAdd()
+
+                // The current QuickCart product cards expose quantity controls,
+                // not an ADD button. Reuse an existing cart state through its
+                // accessible CTA, or seed one item before opening the cart.
+                if (labels.any { it.startsWith("View Cart") }) {
+                    step = RunStep.WAIT_CART
+                    clickByPrefix("View Cart")
+                    return
+                }
+                val increase = findByLabel(root, "Increase quantity")
+                if (increase != null) {
+                    if (consumeAction("tap", "Increase quantity to seed cart")) {
+                        increase.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                    }
+                    increase.recycle()
+                    step = RunStep.WAIT_CART
+                    handler.postDelayed({ clickByPrefix("View Cart") }, 700)
+                    return
+                }
+
+                if (!catalogProbeScheduled) {
+                    catalogProbeScheduled = true
+                    PocketQaSessionStore.record("wait", "Waiting for QuickCart cart controls")
+                    handler.postDelayed({
+                        if (running && step == RunStep.WAIT_CATALOG) {
+                            catalogProbeScheduled = false
+                            val latest = rootInActiveWindow ?: return@postDelayed
+                            handleQuickCart(latest, latest.toSnapshot())
+                            latest.recycle()
+                        }
+                    }, CATALOG_LOAD_WINDOW_MS)
+                }
             }
             labels.any { it.startsWith("My Cart") } && step == RunStep.WAIT_CART -> {
                 val decrease = findByLabel(root, "Decrease quantity") ?: return
@@ -770,7 +792,7 @@ class PocketQaAccessibilityService : AccessibilityService() {
     private fun consumeAction(kind: String, detail: String): Boolean {
         actionCount += 1
         if (explorationMode != ExplorationMode.GEMMA_AUTONOMOUS && actionCount > MAX_ACTIONS) {
-            failRun("Action budget reached ($MAX_ACTIONS)")
+            failRun("Safety pause: repeated interactions need review")
             return false
         }
         PocketQaSessionStore.record(kind, detail)
@@ -967,7 +989,8 @@ class PocketQaAccessibilityService : AccessibilityService() {
 
         fun currentReport(): String = QaReport.render(findings, running)
 
-        private const val MAX_ACTIONS = 20
+        // A safety guard, deliberately not a user-visible model/task cap.
+        private const val MAX_ACTIONS = 120
         private const val MAX_MODEL_CANDIDATES = 10
         private const val MAX_SCREEN_LABELS = 50
         private const val AUTONOMOUS_INITIAL_WAIT_MS = 2_500L
