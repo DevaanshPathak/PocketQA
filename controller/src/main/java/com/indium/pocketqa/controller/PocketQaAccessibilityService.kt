@@ -25,6 +25,7 @@ class PocketQaAccessibilityService : AccessibilityService() {
     private val autonomousRejectedReplies = mutableListOf<String>()
     private var autonomousLastFingerprint: String? = null
     private var autonomousLastAction: String? = null
+    private val autonomousCoverage = mutableSetOf<String>()
     private var autonomousInitialProbeScheduled = false
     private var visualFallbackAttempts = 0
     private var visualFallbackInFlight = false
@@ -61,6 +62,7 @@ class PocketQaAccessibilityService : AccessibilityService() {
         autonomousRejectedReplies.clear()
         autonomousLastFingerprint = null
         autonomousLastAction = null
+        autonomousCoverage.clear()
         autonomousInitialProbeScheduled = false
         visualFallbackAttempts = 0
         visualFallbackInFlight = false
@@ -119,6 +121,7 @@ class PocketQaAccessibilityService : AccessibilityService() {
             }
             .take(MAX_MODEL_CANDIDATES)
         val fingerprint = (snapshot.labels() + candidates).joinToString("|").hashCode().toString()
+        updateAutonomousCoverage(snapshot, autonomousLastAction)
         val screenChanged = autonomousLastFingerprint?.let { it != fingerprint }
         autonomousLastFingerprint = fingerprint
         if (candidates.isEmpty()) {
@@ -171,6 +174,7 @@ class PocketQaAccessibilityService : AccessibilityService() {
                                 rejectedReplies = autonomousRejectedReplies,
                                 previousAction = autonomousLastAction,
                                 screenChanged = screenChanged,
+                                remainingCoverage = autonomousRemainingCoverage(),
                             ),
                         ) { result ->
                             val response = (result as? ModelPromptResult.Success)?.text.orEmpty()
@@ -194,6 +198,30 @@ class PocketQaAccessibilityService : AccessibilityService() {
                     }
                 }
             }
+        }
+    }
+
+    private fun updateAutonomousCoverage(snapshot: SemanticNode, action: String?) {
+        val labels = snapshot.labels().joinToString(" ")
+        if (labels.contains("PocketQA Testbed")) autonomousCoverage += "catalog"
+        if (labels.contains("Your Cart")) autonomousCoverage += "cart"
+        if (labels.contains("Checkout")) autonomousCoverage += "checkout"
+        if (action?.contains("Add ") == true) autonomousCoverage += "add item"
+        if (action?.contains("Decrease quantity") == true) autonomousCoverage += "quantity boundary"
+        if (action?.contains("Place Order") == true || action?.contains("ORDER NOW") == true) autonomousCoverage += "submission"
+    }
+
+    private fun autonomousRemainingCoverage(): List<String> = listOf(
+        "catalog item add", "cart screen", "quantity lower boundary (decrease twice)",
+        "checkout validation", "order submission", "scroll or return navigation",
+    ).filterNot { required ->
+        when (required) {
+            "catalog item add" -> "add item" in autonomousCoverage
+            "cart screen" -> "cart" in autonomousCoverage
+            "quantity lower boundary (decrease twice)" -> "quantity boundary" in autonomousCoverage
+            "checkout validation" -> "checkout" in autonomousCoverage
+            "order submission" -> "submission" in autonomousCoverage
+            else -> false
         }
     }
 

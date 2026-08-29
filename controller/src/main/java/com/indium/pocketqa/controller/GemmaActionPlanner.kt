@@ -17,6 +17,7 @@ object GemmaActionPlanner {
         rejectedReplies: List<String> = emptyList(),
         previousAction: String? = null,
         screenChanged: Boolean? = null,
+        remainingCoverage: List<String> = emptyList(),
     ): String = """
         You are PocketQA, an offline Android UI test planner.
         Inspect the screen image, its Semantics summary, and every listed action
@@ -32,6 +33,8 @@ object GemmaActionPlanner {
         back to earlier screens when available. Prefer an unvisited screen or
         untried control over advancing the happy path. A terminal screen is an
         observation point, not proof that the app has been fully tested.
+        Remaining required coverage: ${remainingCoverage.joinToString("; ").ifBlank { "all charter areas observed" }}.
+        Choose an action that advances one remaining coverage item whenever possible.
 
         Deliberately exercise numeric boundaries and state transitions. For a
         cart or quantity control, add an item, decrease it to its minimum, then
