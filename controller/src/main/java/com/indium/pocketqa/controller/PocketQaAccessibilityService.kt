@@ -13,6 +13,7 @@ class PocketQaAccessibilityService : AccessibilityService() {
     private val handler = Handler(Looper.getMainLooper())
     private var step = RunStep.IDLE
     private var lastEventAt = 0L
+    private var targetPackage = DEFAULT_TARGET_PACKAGE
 
     override fun onServiceConnected() {
         instance = this
@@ -24,9 +25,10 @@ class PocketQaAccessibilityService : AccessibilityService() {
         super.onDestroy()
     }
 
-    private fun beginRun(goal: TestGoal) {
+    private fun beginRun(goal: TestGoal, packageName: String) {
         findings.clear()
         running = true
+        targetPackage = packageName
         step = RunStep.WAIT_CATALOG
         PocketQaSessionStore.start(goal)
         PocketQaSessionStore.record("run", "Starting ${goal.title}")
@@ -35,7 +37,7 @@ class PocketQaAccessibilityService : AccessibilityService() {
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        if (!running || event?.packageName?.toString() != TARGET_PACKAGE) return
+        if (!running || event?.packageName?.toString() != targetPackage) return
         lastEventAt = System.currentTimeMillis()
         val root = rootInActiveWindow ?: return
         val snapshot = root.toSnapshot()
@@ -146,7 +148,7 @@ class PocketQaAccessibilityService : AccessibilityService() {
     }
 
     private fun launchTarget() {
-        val intent = packageManager.getLaunchIntentForPackage(TARGET_PACKAGE)
+        val intent = packageManager.getLaunchIntentForPackage(targetPackage)
             ?: run {
                 PocketQaSessionStore.fail("Buggy App is not installed")
                 running = false
@@ -224,14 +226,17 @@ class PocketQaAccessibilityService : AccessibilityService() {
 
     companion object {
         private const val TAG = "PocketQA"
-        private const val TARGET_PACKAGE = "com.pocketqa.pocketqa"
+        const val DEFAULT_TARGET_PACKAGE = "com.pocketqa.pocketqa"
         private var instance: PocketQaAccessibilityService? = null
         private val findings = mutableListOf<BugFinding>()
         private var running = false
 
-        fun startTestRun(goal: TestGoal = TestGoal.FULL_SCAN): Boolean {
+        fun startTestRun(
+            goal: TestGoal = TestGoal.FULL_SCAN,
+            targetPackage: String = DEFAULT_TARGET_PACKAGE,
+        ): Boolean {
             val service = instance ?: return false
-            service.beginRun(goal)
+            service.beginRun(goal, targetPackage)
             return true
         }
 

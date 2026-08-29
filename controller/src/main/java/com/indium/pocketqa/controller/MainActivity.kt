@@ -1,6 +1,7 @@
 package com.indium.pocketqa.controller
 
 import android.app.Activity
+import android.content.pm.PackageManager
 import android.content.Intent
 import android.graphics.Color
 import android.os.Bundle
@@ -10,13 +11,21 @@ import android.widget.LinearLayout
 import android.widget.RadioButton
 import android.widget.RadioGroup
 import android.widget.ScrollView
+import android.widget.Spinner
 import android.widget.TextView
+import android.widget.ArrayAdapter
 
 class MainActivity : Activity() {
     private lateinit var content: LinearLayout
     private var unsubscribe: (() -> Unit)? = null
     private lateinit var modelRuntime: LiteRtModelRuntime
     private var modelStatus = "Model smoke test not run"
+    private var selectedTarget: TestTarget? = null
+    private var selectedFinding: BugFinding? = null
+
+    private data class TestTarget(val label: String, val packageName: String) {
+        override fun toString(): String = label
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -58,7 +67,12 @@ class MainActivity : Activity() {
             setPadding(0, 12, 0, 8)
             setTextColor(Color.rgb(50, 50, 65))
         })
-        if (snapshot.status == RunStatus.RUNNING) renderRun(snapshot) else renderGoalPicker(snapshot)
+        when {
+            snapshot.status == RunStatus.RUNNING -> renderRun(snapshot)
+            selectedFinding != null -> renderDiagnosis(selectedFinding!!)
+            snapshot.status == RunStatus.COMPLETE && snapshot.findings.isNotEmpty() -> renderIssueReport(snapshot)
+            else -> renderGoalPicker(snapshot)
+        }
     }
 
     private fun runModelSmokeTest() {
@@ -122,6 +136,31 @@ class MainActivity : Activity() {
             textSize = 18f
             setPadding(0, 32, 0, 16)
         })
+        val targets = compatibleTargets()
+        if (targets.isEmpty()) {
+            content.addView(TextView(this).apply {
+                text = "Buggy App not installed. Install the companion app, then reopen PocketQA."
+                setTextColor(Color.rgb(160, 30, 30))
+                setPadding(0, 12, 0, 8)
+            })
+            return
+        }
+        content.addView(TextView(this).apply {
+            text = "Target app"
+            textSize = 16f
+            setPadding(0, 20, 0, 6)
+        })
+        val targetPicker = Spinner(this).apply {
+            adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, targets)
+            setSelection(targets.indexOfFirst { it.packageName == selectedTarget?.packageName }.coerceAtLeast(0))
+            setOnItemSelectedListener(object : android.widget.AdapterView.OnItemSelectedListener {
+                override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: android.view.View?, position: Int, id: Long) {
+                    selectedTarget = targets[position]
+                }
+                override fun onNothingSelected(parent: android.widget.AdapterView<*>?) = Unit
+            })
+        }
+        content.addView(targetPicker)
         val goals = RadioGroup(this)
         TestGoal.entries.forEachIndexed { index, goal ->
             goals.addView(RadioButton(this).apply {
@@ -136,7 +175,10 @@ class MainActivity : Activity() {
             setOnClickListener {
                 val selected = goals.checkedRadioButtonId - 100
                 val goal = TestGoal.entries.getOrElse(selected) { TestGoal.FULL_SCAN }
-                if (!PocketQaAccessibilityService.startTestRun(goal)) {
+                val target = selectedTarget
+                if (target == null) {
+                    PocketQaSessionStore.fail("Select the Buggy App to test first.")
+                } else if (!PocketQaAccessibilityService.startTestRun(goal, target.packageName)) {
                     PocketQaSessionStore.fail("Enable PocketQA Semantics Reader first.")
                 }
             }
@@ -150,6 +192,18 @@ class MainActivity : Activity() {
                 setPadding(0, 24, 0, 0)
             })
         }
+    }
+
+    private fun compatibleTargets(): List<TestTarget> {
+        val targetPackage = PocketQaAccessibilityService.DEFAULT_TARGET_PACKAGE
+        val appInfo = try {
+            @Suppress("DEPRECATION")
+            packageManager.getApplicationInfo(targetPackage, 0)
+        } catch (_: PackageManager.NameNotFoundException) {
+            return emptyList()
+        }
+        val label = packageManager.getApplicationLabel(appInfo).toString().ifBlank { "Buggy App" }
+        return listOf(TestTarget("$label (Buggy App)", targetPackage))
     }
 
     private fun renderRun(snapshot: SessionSnapshot) {
@@ -177,6 +231,57 @@ class MainActivity : Activity() {
                 setTextColor(Color.rgb(150, 45, 25))
             })
         }
+    }
+
+    private fun renderIssueReport(snapshot: SessionSnapshot) {
+        content.addView(TextView(this).apply {
+            text = "Run complete: ${snapshot.findings.size} issue(s) found"
+            textSize = 18f
+            setPadding(0, 28, 0, 12)
+        })
+        snapshot.findings.forEach { finding ->
+            content.addView(TextView(this).apply {
+                text = "${finding.title}\n${finding.evidence}"
+                setPadding(0, 14, 0, 4)
+            })
+            content.addView(Button(this).apply {
+                text = "Diagnose locally"
+                setOnClickListener {
+                    selectedFinding = finding
+                    render(PocketQaSessionStore.snapshot())
+                }
+            })
+        }
+        content.addView(Button(this).apply {
+            text = "Start another run"
+            setOnClickListener {
+                PocketQaSessionStore.stop()
+                render(PocketQaSessionStore.snapshot())
+            }
+        })
+    }
+
+    private fun renderDiagnosis(finding: BugFinding) {
+        val diagnosis = KnownBugCatalog.diagnose(finding)
+        val source = LocalSourceLookup(this).read(diagnosis.sourceKey)
+            ?.lineSequence()?.take(36)?.joinToString("\n")
+            ?: "Local source was not found."
+        content.addView(TextView(this).apply {
+            text = "Local diagnosis\n${finding.title}"
+            textSize = 18f
+            setPadding(0, 28, 0, 8)
+        })
+        content.addView(TextView(this).apply {
+            text = "Cause\n${diagnosis.cause}\n\nReproduce\n${diagnosis.reproduction}\n\nSource: ${diagnosis.sourceKey}\n$source\n\nSuggested patch\n${diagnosis.diff}"
+            setTextColor(Color.rgb(30, 30, 40))
+        })
+        content.addView(Button(this).apply {
+            text = "Back to issues"
+            setOnClickListener {
+                selectedFinding = null
+                render(PocketQaSessionStore.snapshot())
+            }
+        })
     }
 
     override fun onDestroy() {
