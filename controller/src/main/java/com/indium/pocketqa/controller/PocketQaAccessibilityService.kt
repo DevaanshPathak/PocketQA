@@ -93,7 +93,10 @@ class PocketQaAccessibilityService : AccessibilityService() {
         }
         val snapshot = root.toSnapshot()
         PocketQaSessionStore.record("observe", "${step.name}: ${snapshot.label ?: snapshot.className}")
-        testingOverlay.show("PocketQA AI\nObserving ${snapshot.label ?: "screen"}\nStep ${actionCount + 1}/$MAX_ACTIONS")
+        val stepProgress = if (explorationMode == ExplorationMode.GEMMA_ASSISTED) {
+            "Task ${actionCount + 1}"
+        } else "Step ${actionCount + 1}/$MAX_ACTIONS"
+        testingOverlay.show("PocketQA AI\nObserving ${snapshot.label ?: "screen"}\n$stepProgress")
         Log.d(TAG, "STATE ${step.name}:\n${TreeFormatter.format(snapshot)}")
 
         if (explorationMode == ExplorationMode.GEMMA_AUTONOMOUS) {
@@ -641,7 +644,10 @@ class PocketQaAccessibilityService : AccessibilityService() {
             return false
         }
         PocketQaSessionStore.record(kind, detail)
-        testingOverlay.show("PocketQA AI\nReasoning: $kind $detail\nAction $actionCount/$MAX_ACTIONS")
+        val actionProgress = if (explorationMode == ExplorationMode.GEMMA_ASSISTED) {
+            "Task $actionCount"
+        } else "Action $actionCount/$MAX_ACTIONS"
+        testingOverlay.show("PocketQA AI\nReasoning: $kind $detail\n$actionProgress")
         return true
     }
 
