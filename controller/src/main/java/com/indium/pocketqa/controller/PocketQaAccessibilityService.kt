@@ -21,6 +21,7 @@ class PocketQaAccessibilityService : AccessibilityService() {
     private var gemmaPlanningInFlight = false
     private var gemmaHasGuidedRun = false
     private val autonomousVisitedLabels = mutableSetOf<String>()
+    private val autonomousLabelActionCounts = mutableMapOf<String, Int>()
     private var autonomousInitialProbeScheduled = false
     private var visualFallbackAttempts = 0
     private var visualFallbackInFlight = false
@@ -53,6 +54,7 @@ class PocketQaAccessibilityService : AccessibilityService() {
         gemmaPlanningInFlight = false
         gemmaHasGuidedRun = false
         autonomousVisitedLabels.clear()
+        autonomousLabelActionCounts.clear()
         autonomousInitialProbeScheduled = false
         visualFallbackAttempts = 0
         visualFallbackInFlight = false
@@ -104,7 +106,11 @@ class PocketQaAccessibilityService : AccessibilityService() {
         if (gemmaPlanningInFlight) return
         val candidates = clickableLabels(root)
             .filterNot { it in SYSTEM_NAVIGATION_LABELS }
-            .filterNot { it in autonomousVisitedLabels && it !in AUTONOMOUS_REVISITABLE_LABELS }
+            .filterNot { label ->
+                label in autonomousVisitedLabels &&
+                    (label !in AUTONOMOUS_REVISITABLE_LABELS ||
+                        (autonomousLabelActionCounts[label] ?: 0) >= MAX_REPEATED_LABEL_ACTIONS)
+            }
             .take(MAX_MODEL_CANDIDATES)
         if (candidates.isEmpty()) {
             if (!autonomousInitialProbeScheduled && actionCount == 0) {
@@ -220,6 +226,7 @@ class PocketQaAccessibilityService : AccessibilityService() {
             return
         }
         autonomousVisitedLabels += label
+        autonomousLabelActionCounts[label] = (autonomousLabelActionCounts[label] ?: 0) + 1
         PocketQaSessionStore.record("model", "Gemma selected: $label")
         if (consumeAction("tap", "$label (Gemma autonomous)")) node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
         node.recycle()
@@ -733,9 +740,9 @@ class PocketQaAccessibilityService : AccessibilityService() {
         private const val VISUAL_ATTEMPT_LIMIT = 2
         private const val SPARSE_SEMANTICS_THRESHOLD = 2
         private val AUTONOMOUS_REVISITABLE_LABELS = setOf(
-            "Shopping cart", "ORDER NOW", "Place Order", "Increase quantity", "Decrease quantity",
-            "Checkout", "Your Cart",
+            "Increase quantity", "Decrease quantity",
         )
+        private const val MAX_REPEATED_LABEL_ACTIONS = 3
         private val SYSTEM_NAVIGATION_LABELS = setOf("Back", "Home", "Recents", "Overview")
     }
 }
