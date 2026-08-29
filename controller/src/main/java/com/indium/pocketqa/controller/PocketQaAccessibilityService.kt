@@ -133,11 +133,14 @@ class PocketQaAccessibilityService : AccessibilityService() {
         val labels = snapshot.labels()
         when {
             labels.any { it.contains("QuickCart", ignoreCase = true) } && step == RunStep.WAIT_CATALOG -> {
+                if (explorationMode == ExplorationMode.GEMMA_ASSISTED && !gemmaHasGuidedRun) {
+                    requestGemmaQuickCartAction(snapshot)
+                    return
+                }
                 val add = findByLabel(root, "ADD")
                 if (add != null) {
                     add.recycle()
-                    if (explorationMode == ExplorationMode.GEMMA_ASSISTED && !gemmaHasGuidedRun) requestGemmaQuickCartAction(snapshot)
-                    else tapQuickCartAdd()
+                    tapQuickCartAdd()
                     return
                 }
 
@@ -205,8 +208,13 @@ class PocketQaAccessibilityService : AccessibilityService() {
 
     private fun requestGemmaQuickCartAction(snapshot: SemanticNode) {
         if (gemmaPlanningInFlight) return
-        val candidates = snapshot.labels().filter { it == "ADD" }.distinct().take(4)
-        if (candidates.isEmpty()) return tapQuickCartAdd()
+        val candidates = snapshot.labels().filter {
+            it == "ADD" || it == "Increase quantity" || it.startsWith("View Cart")
+        }.distinct().take(6)
+        if (candidates.isEmpty()) {
+            gemmaHasGuidedRun = true
+            return
+        }
         gemmaPlanningInFlight = true
         PocketQaSessionStore.record("model", "Gemma is selecting a visible QuickCart product action")
         testingOverlay.show("PocketQA AI\nGemma inspecting QuickCart locally…")
@@ -231,8 +239,27 @@ class PocketQaAccessibilityService : AccessibilityService() {
         if (!running || step != RunStep.WAIT_CATALOG) return
         gemmaPlanningInFlight = false
         gemmaHasGuidedRun = true
-        PocketQaSessionStore.record("model", "Gemma QuickCart decision ($source): ${response?.take(100)?.replace('\n', ' ') ?: "bounded fallback"}")
-        tapQuickCartAdd()
+        PocketQaSessionStore.record("model", "Gemma QuickCart decision ($source): ${response?.take(100)?.replace('\n', ' ') ?: "safe fallback"}")
+        val candidates = rootInActiveWindow?.toSnapshot()?.labels().orEmpty()
+        val choice = response?.let { GemmaActionPlanner.chooseLabel(it, candidates) }
+        when {
+            choice?.startsWith("View Cart") == true || candidates.any { it.startsWith("View Cart") } -> {
+                step = RunStep.WAIT_CART
+                clickByPrefix("View Cart")
+            }
+            choice == "Increase quantity" || candidates.any { it == "Increase quantity" } -> {
+                val root = rootInActiveWindow ?: return
+                val increase = findByLabel(root, "Increase quantity")
+                if (increase != null && consumeAction("tap", "Increase quantity (Gemma-guided)")) {
+                    increase.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                }
+                increase?.recycle()
+                root.recycle()
+                step = RunStep.WAIT_CART
+                handler.postDelayed({ clickByPrefix("View Cart") }, 700)
+            }
+            else -> tapQuickCartAdd()
+        }
     }
 
     private fun tapQuickCartAdd() {
