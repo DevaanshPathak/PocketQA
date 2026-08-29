@@ -71,6 +71,8 @@ class OrderModel {
     required this.updatedAt,
   });
 
+  double get totalAmount => total;
+
   factory OrderModel.fromMap(Map<String, dynamic> map, String id) {
     final rawItems = map['items'] as List<dynamic>? ?? [];
     return OrderModel(

@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'cart_item_model.dart';
 
 class ProductModel {
   final String id;
@@ -34,6 +35,54 @@ class ProductModel {
     required this.createdAt,
     required this.updatedAt,
   });
+
+  CartItemModel toCartItem({int quantity = 1}) {
+    return CartItemModel(
+      productId: id,
+      productName: name,
+      quantity: quantity,
+      unitPrice: price,
+      imageUrl: imageUrl,
+      quantityLabel: quantityLabel,
+      updatedAt: DateTime.now(),
+    );
+  }
+
+  ProductModel copyWith({
+    String? id,
+    String? name,
+    String? description,
+    String? categoryId,
+    String? brand,
+    String? quantityLabel,
+    double? price,
+    double? originalPrice,
+    int? discountPercentage,
+    String? imageUrl,
+    bool? isAvailable,
+    int? stockQuantity,
+    int? sortOrder,
+    DateTime? createdAt,
+    DateTime? updatedAt,
+  }) {
+    return ProductModel(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      description: description ?? this.description,
+      categoryId: categoryId ?? this.categoryId,
+      brand: brand ?? this.brand,
+      quantityLabel: quantityLabel ?? this.quantityLabel,
+      price: price ?? this.price,
+      originalPrice: originalPrice ?? this.originalPrice,
+      discountPercentage: discountPercentage ?? this.discountPercentage,
+      imageUrl: imageUrl ?? this.imageUrl,
+      isAvailable: isAvailable ?? this.isAvailable,
+      stockQuantity: stockQuantity ?? this.stockQuantity,
+      sortOrder: sortOrder ?? this.sortOrder,
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+    );
+  }
 
   factory ProductModel.fromMap(Map<String, dynamic> map, String id) {
     return ProductModel(

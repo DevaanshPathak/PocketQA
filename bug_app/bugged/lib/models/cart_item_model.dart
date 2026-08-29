@@ -21,6 +21,8 @@ class CartItemModel {
 
   double get totalPrice => quantity * unitPrice;
 
+  String get name => productName;
+
   factory CartItemModel.fromMap(Map<String, dynamic> map, String id) {
     return CartItemModel(
       productId: map['productId'] as String? ?? id,

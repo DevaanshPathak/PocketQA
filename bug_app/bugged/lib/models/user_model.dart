@@ -23,6 +23,8 @@ class UserModel {
     this.isActive = true,
   });
 
+  String get phoneNumber => phone;
+
   factory UserModel.fromMap(Map<String, dynamic> map, String id) {
     return UserModel(
       uid: id,

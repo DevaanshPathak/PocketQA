@@ -53,12 +53,14 @@ class QuantitySelector extends StatelessWidget {
           ),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 4),
-            style: const TextStyle(
-              color: Colors.white,
-              fontWeight: FontWeight.bold,
-              fontSize: 14,
+            child: Text(
+              '$quantity',
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+                fontSize: 14,
+              ),
             ),
-            child: Text('$quantity'),
           ),
           IconButton(
             padding: EdgeInsets.zero,

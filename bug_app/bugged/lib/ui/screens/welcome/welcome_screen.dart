@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../theme.dart';
-import '../widgets/app_bottom_navigation.dart';
+import '../../widgets/app_bottom_navigation.dart';
 import '../auth/login_screen.dart';
 
 class WelcomeScreen extends StatelessWidget {

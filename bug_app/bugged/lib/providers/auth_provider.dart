@@ -23,6 +23,7 @@ class AuthProvider extends ChangeNotifier {
 
   User? get firebaseUser => _firebaseUser;
   UserModel? get userModel => _userModel;
+  UserModel? get user => _userModel;
   bool get isAuthenticated => _firebaseUser != null;
   bool get isLoading => _isLoading;
   String? get errorMessage => _errorMessage;
@@ -59,6 +60,9 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
+  Future<bool> signInWithEmail({required String email, required String password}) =>
+      signIn(email, password);
+
   Future<bool> signUp(String displayName, String email, String password) async {
     _setLoading(true);
     try {
@@ -76,14 +80,23 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
-  Future<void> signInAnonymously() async {
+  Future<bool> signUpWithEmail({
+    required String email,
+    required String password,
+    required String name,
+  }) =>
+      signUp(name, email, password);
+
+  Future<bool> signInAnonymously() async {
     _setLoading(true);
     try {
       await _authRepository.signInAnonymously();
+      _setLoading(false);
+      return true;
     } catch (e) {
       _setError(e.toString());
-    } finally {
       _setLoading(false);
+      return false;
     }
   }
 

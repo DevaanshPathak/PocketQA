@@ -47,7 +47,7 @@ class QuickCartTheme {
           fontWeight: FontWeight.bold,
         ),
       ),
-      cardTheme: CardTheme(
+      cardTheme: CardThemeData(
         color: surfaceWhite,
         elevation: 1,
         shadowColor: Colors.black.withOpacity(0.05),

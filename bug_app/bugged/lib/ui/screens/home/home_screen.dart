@@ -48,7 +48,7 @@ class HomeScreen extends StatelessWidget {
                                 'QuickCart',
                                 style: TextStyle(
                                   fontSize: 22,
-                                  fontWeight: FontWeight.extrabold,
+                                  fontWeight: FontWeight.w800,
                                   color: QuickCartTheme.primaryDarkGreen,
                                   letterSpacing: -0.5,
                                 ),

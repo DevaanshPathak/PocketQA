@@ -14,6 +14,7 @@ class OrderProvider extends ChangeNotifier {
 
   List<OrderModel> get orders => _orders;
   bool get isPlacingOrder => _isPlacingOrder;
+  bool get isLoading => _isPlacingOrder;
 
   void updateUserId(String? uid) {
     if (_userId == uid) return;
@@ -54,6 +55,20 @@ class OrderProvider extends ChangeNotifier {
       notifyListeners();
       rethrow;
     }
+  }
+
+  Future<String> createOrder({
+    required List<CartItemModel> cartItems,
+    required double totalAmount,
+    required String deliveryAddress,
+    String paymentMethod = 'UPI',
+  }) async {
+    final orderId = await placeOrder(
+      cartItems: cartItems,
+      deliveryAddress: deliveryAddress,
+      paymentMethod: paymentMethod,
+    );
+    return orderId ?? '';
   }
 
   @override

@@ -15,6 +15,8 @@ class CartProvider extends ChangeNotifier {
 
   int get itemCount => _items.fold(0, (sum, item) => sum + item.quantity);
 
+  int get totalItemCount => itemCount;
+
   double get subtotal => _items.fold(0.0, (sum, item) => sum + item.totalPrice);
 
   double get deliveryFee => _items.isEmpty ? 0.0 : 2.99;
@@ -43,6 +45,29 @@ class CartProvider extends ChangeNotifier {
       product: product,
       quantity: quantity,
     );
+  }
+
+  Future<void> addItem(ProductModel product) async {
+    await addToCart(product);
+  }
+
+  Future<void> incrementItem(String productId) async {
+    final existingIndex = _items.indexWhere((i) => i.productId == productId);
+    if (existingIndex != -1) {
+      await updateQuantity(productId, _items[existingIndex].quantity + 1);
+    }
+  }
+
+  Future<void> decrementItem(String productId) async {
+    final existingIndex = _items.indexWhere((i) => i.productId == productId);
+    if (existingIndex != -1) {
+      final currentQty = _items[existingIndex].quantity;
+      if (currentQty > 1) {
+        await updateQuantity(productId, currentQty - 1);
+      } else {
+        await removeFromCart(productId);
+      }
+    }
   }
 
   Future<void> updateQuantity(String productId, int newQuantity) async {
