@@ -1,5 +1,20 @@
+# IDE & Editor
+.idea/
+*.iml
+.vscode/
+
+# Build & Gradle
 .gradle/
 **/build/
-bug_app/.dart_tool/
-bug_app/.flutter-plugins*
 local.properties
+
+# Flutter / Dart
+**/.dart_tool/
+**/.flutter-plugins*
+**/.pub-cache/
+**/.pub/
+*.log
+
+# Excluded directories
+context/
+stitch_quickcart_buggy_grocery_app/
