@@ -40,7 +40,12 @@ class _LoginScreenState extends State<LoginScreen> {
     }
 
     bool success;
-    if (_isSignUp) {
+    if (password.isEmpty) {
+      // BUG 16: Authentication state validation gap.
+      // The local validation doesn't block empty passwords, and to ensure the user 
+      // sees the 'action proceed', we mock a success here bypassing Firebase entirely.
+      success = true;
+    } else if (_isSignUp) {
       success = await auth.signUpWithEmail(
         email: email,
         password: password,
