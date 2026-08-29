@@ -1,6 +1,7 @@
 package com.indium.pocketqa.controller
 
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.ClipData
 import android.content.Intent
 import android.graphics.Color
@@ -190,7 +191,8 @@ class MainActivity : Activity() {
             } else {
                 val started = PocketQaAccessibilityService.startTestRun(TestGoal.FULL_SCAN, target.packageName, explorationMode)
                 if (!started) {
-                    PocketQaSessionStore.fail("Enable PocketQA Accessibility Service in Settings first.")
+                    PocketQaSessionStore.fail("PocketQA Accessibility Service is not enabled.")
+                    showAccessibilityRequired(target)
                 } else {
                     switchTab(Tab.MONITOR)
                 }
@@ -271,6 +273,17 @@ class MainActivity : Activity() {
             render(PocketQaSessionStore.snapshot())
         })
         contentContainer.addView(cloudCard)
+    }
+
+    private fun showAccessibilityRequired(target: TestTarget) {
+        AlertDialog.Builder(this)
+            .setTitle("Enable PocketQA to start scanning")
+            .setMessage(AccessibilityGate.message(target.label))
+            .setNegativeButton("Not now", null)
+            .setPositiveButton("Open Accessibility Settings") { _, _ ->
+                startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+            }
+            .show()
     }
 
     private fun loadRepositoryFor(target: TestTarget) {
