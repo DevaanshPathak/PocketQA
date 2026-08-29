@@ -12,6 +12,7 @@ import android.text.SpannableStringBuilder
 import android.text.InputType
 import android.text.style.ForegroundColorSpan
 import android.view.View
+import android.view.WindowManager
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import android.widget.Button
@@ -65,6 +66,10 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // PocketQA is a demo/QA controller. Never mark its UI as secure: BYOK keys
+        // are masked in their input field, while the surrounding app must remain
+        // visible to legitimate screen-sharing and presentation tools.
+        window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
         setContentView(R.layout.activity_main)
 
         modelRuntime = LiteRtModelRuntime(this)
