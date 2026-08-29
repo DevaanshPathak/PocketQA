@@ -97,7 +97,7 @@ object GemmaActionPlanner {
         return Assessment(
             actionLabel = chooseLabel(response, candidates),
             actionCoordinate = coordinate,
-            goBack = Regex("(?im)^BACK\\s*$").containsMatchIn(response),
+            goBack = Regex("(?im)^(?:BACK|TAP\\s*:\\s*BACK)\\s*$").containsMatchIn(response),
             issueTitle = parts?.firstOrNull()?.takeUnless { it.isNullOrBlank() },
             issueEvidence = parts?.getOrNull(1)?.takeUnless { it.isBlank() },
         )
