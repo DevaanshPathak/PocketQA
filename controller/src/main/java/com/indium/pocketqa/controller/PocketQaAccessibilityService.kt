@@ -17,6 +17,10 @@ class PocketQaAccessibilityService : AccessibilityService() {
     private lateinit var testingOverlay: TestingOverlay
     private var actionCount = 0
     private var catalogProbeScheduled = false
+    private var explorationMode = ExplorationMode.DETERMINISTIC
+    private var gemmaPlanningInFlight = false
+    private var gemmaHasGuidedRun = false
+    private lateinit var modelRuntime: LiteRtModelRuntime
     private val timeoutRunnable = Runnable {
         if (running) failRun("Safety timeout: exploration stopped after 30 seconds")
     }
@@ -24,24 +28,29 @@ class PocketQaAccessibilityService : AccessibilityService() {
     override fun onServiceConnected() {
         instance = this
         testingOverlay = TestingOverlay(this)
+        modelRuntime = LiteRtModelRuntime(this)
         Log.i(TAG, "PocketQA test service connected")
     }
 
     override fun onDestroy() {
         if (::testingOverlay.isInitialized) testingOverlay.hide()
+        if (::modelRuntime.isInitialized) modelRuntime.close()
         if (instance === this) instance = null
         super.onDestroy()
     }
 
-    private fun beginRun(goal: TestGoal, packageName: String) {
+    private fun beginRun(goal: TestGoal, packageName: String, mode: ExplorationMode) {
         findings.clear()
         running = true
         actionCount = 0
         catalogProbeScheduled = false
+        explorationMode = mode
+        gemmaPlanningInFlight = false
+        gemmaHasGuidedRun = false
         targetPackage = packageName
         step = if (packageName == DEFAULT_TARGET_PACKAGE) RunStep.WAIT_CATALOG else RunStep.WAIT_GENERIC
-        PocketQaSessionStore.start(goal)
-        PocketQaSessionStore.record("run", "Starting ${goal.title}")
+        PocketQaSessionStore.start(goal, mode)
+        PocketQaSessionStore.record("run", "Starting ${goal.title} with ${mode.label}")
         testingOverlay.show("PocketQA AI\nPlanning test trace…")
         handler.removeCallbacks(timeoutRunnable)
         handler.postDelayed(timeoutRunnable, RUN_TIMEOUT_MS)
@@ -90,10 +99,65 @@ class PocketQaAccessibilityService : AccessibilityService() {
         if (renderedProducts < 3) {
             found("Third grocery item fails to render", "Only $renderedProducts of 3 product semantics rendered")
         }
+        if (explorationMode == ExplorationMode.GEMMA_ASSISTED && !gemmaHasGuidedRun) {
+            requestGemmaCatalogAction(snapshot)
+            return
+        }
         val add = findByPrefix(root, "Add ") ?: return
         step = RunStep.WAIT_CART
         if (consumeAction("tap", add.label() ?: "Add item")) add.performAction(AccessibilityNodeInfo.ACTION_CLICK)
         add.recycle()
+        handler.postDelayed({ clickFresh("Shopping cart") }, 700)
+    }
+
+    /** Lets the local model select one visible test action; all later checks remain bounded. */
+    private fun requestGemmaCatalogAction(snapshot: SemanticNode) {
+        if (gemmaPlanningInFlight) return
+        val candidates = snapshot.labels()
+            .filter { it.startsWith("Add ") || it == "Shopping cart" }
+            .distinct()
+            .take(8)
+        if (candidates.isEmpty()) {
+            gemmaHasGuidedRun = true
+            return
+        }
+        gemmaPlanningInFlight = true
+        PocketQaSessionStore.record("model", "Gemma is selecting a visible catalog action")
+        testingOverlay.show("PocketQA AI\nGemma planning locally on GPU…")
+        modelRuntime.initialize { load ->
+            if (load !is ModelLoadResult.Ready) {
+                handler.post { applyGemmaCatalogChoice(null, "model unavailable", candidates) }
+                return@initialize
+            }
+            modelRuntime.runSmokePrompt(GemmaActionPlanner.prompt(snapshot.label ?: "catalog", candidates)) { result ->
+                val response = (result as? ModelPromptResult.Success)?.text.orEmpty()
+                val choice = GemmaActionPlanner.chooseLabel(response, candidates)
+                handler.post { applyGemmaCatalogChoice(choice, response, candidates) }
+            }
+        }
+    }
+
+    private fun applyGemmaCatalogChoice(choice: String?, response: String, candidates: List<String>) {
+        if (!running || step != RunStep.WAIT_CATALOG) return
+        gemmaPlanningInFlight = false
+        gemmaHasGuidedRun = true
+        val selected = choice ?: candidates.firstOrNull { it.startsWith("Add ") }
+        if (choice != null) {
+            PocketQaSessionStore.record("model", "Gemma selected: $choice")
+        } else {
+            PocketQaSessionStore.record("model", "Gemma returned no safe action; using bounded fallback")
+        }
+        val root = rootInActiveWindow ?: return
+        val add = selected?.let { findByLabel(root, it) } ?: findByPrefix(root, "Add ")
+        if (add == null) {
+            root.recycle()
+            return
+        }
+        val label = add.label() ?: "Add item"
+        step = RunStep.WAIT_CART
+        if (consumeAction("tap", "$label (Gemma-guided)")) add.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+        add.recycle()
+        root.recycle()
         handler.postDelayed({ clickFresh("Shopping cart") }, 700)
     }
 
@@ -311,9 +375,10 @@ class PocketQaAccessibilityService : AccessibilityService() {
         fun startTestRun(
             goal: TestGoal = TestGoal.FULL_SCAN,
             targetPackage: String = DEFAULT_TARGET_PACKAGE,
+            mode: ExplorationMode = ExplorationMode.DETERMINISTIC,
         ): Boolean {
             val service = instance ?: return false
-            service.beginRun(goal, targetPackage)
+            service.beginRun(goal, targetPackage, mode)
             return true
         }
 

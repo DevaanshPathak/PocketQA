@@ -20,6 +20,7 @@ class MainActivity : Activity() {
     private lateinit var modelRuntime: LiteRtModelRuntime
     private var modelStatus = "Model smoke test not run"
     private var selectedTarget: TestTarget? = null
+    private var explorationMode = ExplorationMode.DETERMINISTIC
     private var selectedFinding: BugFinding? = null
     private var gemmaDiagnosis: String? = null
     private var gemmaDiagnosisStatus: String? = null
@@ -169,19 +170,38 @@ class MainActivity : Activity() {
             })
         }
         content.addView(targetPicker)
+        content.addView(TextView(this).apply {
+            text = "Test strategy"
+            textSize = 16f
+            setPadding(0, 18, 0, 6)
+        })
+        content.addView(Spinner(this).apply {
+            adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, ExplorationMode.entries)
+            setSelection(explorationMode.ordinal)
+            setOnItemSelectedListener(object : android.widget.AdapterView.OnItemSelectedListener {
+                override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: android.view.View?, position: Int, id: Long) {
+                    explorationMode = ExplorationMode.entries[position]
+                }
+                override fun onNothingSelected(parent: android.widget.AdapterView<*>?) = Unit
+            })
+        })
         val run = Button(this).apply {
             text = "Run full app test"
             setOnClickListener {
                 val target = selectedTarget
                 if (target == null) {
                     PocketQaSessionStore.fail("Select an app to test first.")
-                } else if (!PocketQaAccessibilityService.startTestRun(TestGoal.FULL_SCAN, target.packageName)) {
+                } else if (!PocketQaAccessibilityService.startTestRun(TestGoal.FULL_SCAN, target.packageName, explorationMode)) {
                     PocketQaSessionStore.fail("Enable PocketQA Semantics Reader first.")
                 }
             }
         }
         content.addView(TextView(this).apply {
-            text = "PocketQA will observe the selected app, perform bounded visible actions, and report any detected issue."
+            text = if (explorationMode == ExplorationMode.GEMMA_ASSISTED) {
+                "Gemma will select a visible action locally on the GPU; PocketQA then continues with its bounded safety trace."
+            } else {
+                "PocketQA will observe the selected app, perform bounded visible actions, and report any detected issue."
+            }
             setPadding(0, 16, 0, 8)
         })
         content.addView(run)
@@ -213,7 +233,7 @@ class MainActivity : Activity() {
 
     private fun renderRun(snapshot: SessionSnapshot) {
         content.addView(TextView(this).apply {
-            text = "Exploring: ${snapshot.goal?.title ?: "Buggy App"}"
+            text = "Exploring: ${snapshot.goal?.title ?: "Buggy App"}\n${snapshot.explorationMode.label}"
             textSize = 18f
             setPadding(0, 32, 0, 8)
         })

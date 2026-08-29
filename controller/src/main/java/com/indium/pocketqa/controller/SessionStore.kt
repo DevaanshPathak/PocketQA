@@ -6,6 +6,13 @@ enum class TestGoal(val title: String, val description: String) {
     FULL_SCAN("Full bug scan", "Run every deterministic PocketQA check"),
 }
 
+enum class ExplorationMode(val label: String) {
+    DETERMINISTIC("Deterministic (fast fallback)"),
+    GEMMA_ASSISTED("Gemma-assisted (local GPU)");
+
+    override fun toString(): String = label
+}
+
 enum class RunStatus { IDLE, RUNNING, COMPLETE, STOPPED, ERROR }
 
 data class ActionEvent(
@@ -17,6 +24,7 @@ data class ActionEvent(
 data class SessionSnapshot(
     val status: RunStatus = RunStatus.IDLE,
     val goal: TestGoal? = null,
+    val explorationMode: ExplorationMode = ExplorationMode.DETERMINISTIC,
     val actions: List<ActionEvent> = emptyList(),
     val findings: List<BugFinding> = emptyList(),
     val error: String? = null,
@@ -37,8 +45,8 @@ open class SessionStore {
         return { unsubscribe(listener) }
     }
 
-    fun start(goal: TestGoal) = update {
-        SessionSnapshot(status = RunStatus.RUNNING, goal = goal)
+    fun start(goal: TestGoal, mode: ExplorationMode = ExplorationMode.DETERMINISTIC) = update {
+        SessionSnapshot(status = RunStatus.RUNNING, goal = goal, explorationMode = mode)
     }
 
     fun record(kind: String, detail: String) = update { snapshot ->

@@ -71,6 +71,9 @@ verification, `[ ]` not started.
   events from the accessibility runner.
 - [x] Bound direct service exploration with a 20-action budget and 30-second
   safety timeout; retain the known-good deterministic testbed trace.
+- [x] Add a selectable Gemma-assisted exploration mode: the local GPU model
+  chooses one currently visible semantic action, PocketQA executes only that
+  validated action, then continues with the bounded deterministic safety trace.
 
 ### Phase 2 — product UI
 

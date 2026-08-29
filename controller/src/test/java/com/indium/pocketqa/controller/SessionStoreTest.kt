@@ -30,4 +30,12 @@ class SessionStoreTest {
         assertEquals(RunStatus.STOPPED, snapshot.status)
         assertTrue(snapshot.actions.any { it.detail == "Waiting for catalog" })
     }
+
+    @Test
+    fun `a run preserves its selected exploration mode`() {
+        val store = SessionStore()
+        store.start(TestGoal.FULL_SCAN, ExplorationMode.GEMMA_ASSISTED)
+
+        assertEquals(ExplorationMode.GEMMA_ASSISTED, store.snapshot().explorationMode)
+    }
 }
