@@ -186,7 +186,7 @@ class PocketQaAccessibilityService : AccessibilityService() {
                     val current = rootInActiveWindow ?: return@postDelayed
                     val currentLabels = current.toSnapshot().labels()
                     if (currentLabels.any { it.trim() == "-1" || it.endsWith(" -1") }) {
-                        found("Cart quantity goes below zero", "QuickCart showed quantity -1 after two decrease actions")
+                        found("Quantity zero boundary failure", "QuickCart showed quantity -1 after two decrease actions")
                     } else PocketQaSessionStore.record("detector", "QuickCart quantity lower-bound check completed")
                     current.recycle()
                     step = RunStep.WAIT_CHECKOUT
@@ -845,10 +845,35 @@ class PocketQaAccessibilityService : AccessibilityService() {
     }
 
     private fun findByLabel(node: AccessibilityNodeInfo, wanted: String): AccessibilityNodeInfo? =
-        findNode(node) { it.label() == wanted && it.isClickable }
+        findLabeledAction(node) { it == wanted }
 
     private fun findByPrefix(node: AccessibilityNodeInfo, prefix: String): AccessibilityNodeInfo? =
-        findNode(node) { it.label()?.startsWith(prefix) == true && it.isClickable }
+        findLabeledAction(node) { it.startsWith(prefix) }
+
+    /**
+     * Flutter frequently exposes a useful semantic label on a non-clickable
+     * wrapper and places the actual click action on an unlabeled child. Treat
+     * that wrapper as the action's label and resolve its first clickable
+     * descendant. This keeps actions semantic-first without hard-coded screen
+     * coordinates.
+     */
+    private fun findLabeledAction(
+        node: AccessibilityNodeInfo,
+        matchesLabel: (String) -> Boolean,
+    ): AccessibilityNodeInfo? {
+        val label = node.label()
+        if (label != null && matchesLabel(label)) {
+            if (node.isClickable) return AccessibilityNodeInfo.obtain(node)
+            findNode(node) { it.isClickable }?.let { return it }
+        }
+        for (index in 0 until node.childCount) {
+            val child = node.getChild(index) ?: continue
+            val match = findLabeledAction(child, matchesLabel)
+            child.recycle()
+            if (match != null) return match
+        }
+        return null
+    }
 
     private fun findNode(node: AccessibilityNodeInfo, predicate: (AccessibilityNodeInfo) -> Boolean): AccessibilityNodeInfo? {
         if (predicate(node)) return AccessibilityNodeInfo.obtain(node)
