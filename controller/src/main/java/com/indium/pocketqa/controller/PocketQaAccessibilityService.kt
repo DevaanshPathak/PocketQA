@@ -971,8 +971,12 @@ class PocketQaAccessibilityService : AccessibilityService() {
         private const val MAX_MODEL_CANDIDATES = 10
         private const val MAX_SCREEN_LABELS = 50
         private const val AUTONOMOUS_INITIAL_WAIT_MS = 2_500L
-        private const val RUN_TIMEOUT_MS = 45_000L
-        private const val GUIDED_GEMMA_RUN_TIMEOUT_MS = 120_000L
+        // Keep deterministic runs long enough for both demo apps to complete
+        // their multi-step known-good traces, while retaining a bounded stop.
+        private const val RUN_TIMEOUT_MS = 120_000L
+        // A vision turn on the physical demo phone can take longer than the
+        // original two-minute window. Keep the run bounded but demo-safe.
+        private const val GUIDED_GEMMA_RUN_TIMEOUT_MS = 240_000L
         private const val AUTONOMOUS_RUN_TIMEOUT_MS = 90_000L
         private const val CATALOG_LOAD_WINDOW_MS = 3_000L
         private const val VISUAL_ATTEMPT_LIMIT = 2

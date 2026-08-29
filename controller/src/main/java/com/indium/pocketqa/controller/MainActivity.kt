@@ -22,6 +22,7 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.Spinner
 import android.widget.TextView
+import java.io.File
 
 class MainActivity : Activity() {
     private lateinit var contentContainer: LinearLayout
@@ -48,6 +49,7 @@ class MainActivity : Activity() {
     private var repoSubfolder = ""
     private var repoStatus = "No repository indexed"
     private var repoCorpus: RepoCorpus? = null
+    private var annotatedScreenshotPath: String? = null
     private lateinit var cloudConfig: CloudEscalationConfig
 
     private enum class Tab {
@@ -194,6 +196,7 @@ class MainActivity : Activity() {
             if (target == null) {
                 PocketQaSessionStore.fail("Select a target app first.")
             } else {
+                annotatedScreenshotPath = null
                 val started = PocketQaAccessibilityService.startTestRun(TestGoal.FULL_SCAN, target.packageName, explorationMode)
                 if (!started) {
                     PocketQaSessionStore.fail("PocketQA Accessibility Service is not enabled.")
@@ -250,7 +253,7 @@ class MainActivity : Activity() {
             render(PocketQaSessionStore.snapshot())
             Thread {
                 runCatching { RepoCloneManager(this).cloneAndIndex(RepoRequest(repoUrl, repoRef, repoSubfolder, token), target.packageName) }
-                    .onSuccess { corpus -> repoCorpus = corpus; repoStatus = "Indexed ${corpus.chunks.size} chunks at ${corpus.revision.take(10)}" }
+                    .onSuccess { corpus -> repoCorpus = corpus; repoStatus = "Indexed ${corpus.chunks.size} chunks at ${corpus.revision.take(10)}"; annotatedScreenshotPath = null }
                     .onFailure { error -> repoStatus = "Repository setup failed: ${error.message ?: error.javaClass.simpleName}" }
                 runOnUiThread { render(PocketQaSessionStore.snapshot()) }
             }.start()
@@ -293,7 +296,8 @@ class MainActivity : Activity() {
 
     private fun loadRepositoryFor(target: TestTarget) {
         repoCorpus = null
-        repoStatus = "Loading saved repository for ${target.label}â€¦"
+        annotatedScreenshotPath = null
+        repoStatus = "Loading saved repository for ${target.label}…"
         Thread {
             val binding = RepoCloneManager(this).loadForTarget(target.packageName)
             runOnUiThread {
@@ -434,6 +438,34 @@ class MainActivity : Activity() {
             borderAccent = getColor(R.color.accent_rose)
         )
         contentContainer.addView(titleCard)
+
+        // Visual Bug Highlight: when no repo is linked, locate & annotate the bug in the screenshot
+        val hasRepo = repoCorpus != null
+        val screenshotPath = snapshot.screenshotPath
+        if (!hasRepo && screenshotPath != null && annotatedScreenshotPath == null) {
+            runVisualBugHighlight(finding, screenshotPath)
+        }
+        annotatedScreenshotPath?.let { path ->
+            val annotatedCard = createAccentCard(
+                title = "Visual Bug Highlight (No Repo Linked)",
+                subtitle = "Gemma located the buggy element in the screenshot",
+                borderAccent = getColor(R.color.accent_indigo)
+            )
+            val imgView = android.widget.ImageView(this).apply {
+                setScaleType(android.widget.ImageView.ScaleType.FIT_CENTER)
+                val bitmap = android.graphics.BitmapFactory.decodeFile(path)
+                bitmap?.let { setImageBitmap(it) }
+                val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 400.dpToPx())
+                lp.setMargins(0, 12, 0, 12)
+                layoutParams = lp
+            }
+            annotatedCard.addView(imgView)
+            annotatedCard.addView(createTextView(
+                "Bug location identified by on-device vision model. Coordinates overlay applied.",
+                color = getColor(R.color.text_secondary), textSize = 11f
+            ))
+            contentContainer.addView(annotatedCard)
+        }
 
         // Diagnosis Mode Selector
         val modeCard = createCard("Diagnosis Engine", "Switch between deterministic rule catalog and on-device Gemma LLM")
@@ -769,6 +801,94 @@ class MainActivity : Activity() {
                 }
             }
         } }
+    }
+
+    /**
+     * Runs visual bug highlighting when no repository is linked.
+     * Uses the vision model to locate the buggy element in the screenshot,
+     * then draws an annotation overlay.
+     */
+    private fun runVisualBugHighlight(finding: BugFinding, screenshotPath: String) {
+        val screenshotFile = File(screenshotPath)
+        if (!screenshotFile.isFile || screenshotFile.length() == 0L) {
+            return
+        }
+
+        // Load bitmap to get dimensions
+        val bitmap = android.graphics.BitmapFactory.decodeFile(screenshotPath)
+        if (bitmap == null) return
+        val width = bitmap.width
+        val height = bitmap.height
+        bitmap.recycle()
+
+        // Get visible labels from the latest snapshot for context
+        val visibleLabels = PocketQaSessionStore.snapshot().actions
+            .takeLast(1)
+            .flatMap { it.detail.split(" ").filter { it.isNotBlank() } }
+            .distinct()
+            .take(15)
+
+        val prompt = VisualBugLocator.buildLocatePrompt(
+            bugTitle = finding.title,
+            bugEvidence = finding.evidence,
+            screenWidth = width,
+            screenHeight = height,
+            visibleLabels = visibleLabels
+        )
+
+        modelRuntime.initialize { load ->
+            if (load !is ModelLoadResult.Ready) return@initialize
+
+            // Check if vision artifact is available
+            if (!ModelInstallContract.supportsVision(this)) {
+                runOnUiThread { render(PocketQaSessionStore.snapshot()) }
+                return@initialize
+            }
+
+            modelRuntime.runVisionPrompt(screenshotFile, prompt) { result ->
+                runOnUiThread {
+                    when (result) {
+                        is ModelPromptResult.Success -> {
+                            val locateResult = VisualBugLocator.parseLocateResponse(result.text, width, height)
+                            when (locateResult) {
+                                is VisualBugLocator.LocateResult.Success -> {
+                                    val highlight = VisualBugHighlighter.Highlight(
+                                        x = locateResult.x,
+                                        y = locateResult.y,
+                                        radius = locateResult.radius,
+                                        label = "BUG: ${finding.title.take(30)}",
+                                        style = VisualBugHighlighter.Highlight.Style.PULSE
+                                    )
+                                    VisualBugHighlighter.annotate(this, screenshotFile, listOf(highlight)) { annotateResult ->
+                                        runOnUiThread {
+                                            when (annotateResult) {
+                                                is VisualBugHighlighter.AnnotationResult.Success -> {
+                                                    annotatedScreenshotPath = annotateResult.value.file.absolutePath
+                                                    PocketQaSessionStore.record("visual", "Bug highlighted at (${locateResult.x}, ${locateResult.y}) confidence=${String.format("%.0f", locateResult.confidence * 100)}%")
+                                                    render(PocketQaSessionStore.snapshot())
+                                                }
+                                                is VisualBugHighlighter.AnnotationResult.Failed -> {
+                                                    PocketQaSessionStore.record("visual", "Annotation failed: ${annotateResult.reason}")
+                                                    render(PocketQaSessionStore.snapshot())
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                is VisualBugLocator.LocateResult.Failed -> {
+                                    PocketQaSessionStore.record("visual", "Bug location parse failed: ${locateResult.reason}")
+                                    render(PocketQaSessionStore.snapshot())
+                                }
+                            }
+                        }
+                        is ModelPromptResult.Failed -> {
+                            PocketQaSessionStore.record("visual", "Vision model failed: ${result.message}")
+                            render(PocketQaSessionStore.snapshot())
+                        }
+                    }
+                }
+            }
+        }
     }
 
     private fun runRoutedPatch(finding: BugFinding) {

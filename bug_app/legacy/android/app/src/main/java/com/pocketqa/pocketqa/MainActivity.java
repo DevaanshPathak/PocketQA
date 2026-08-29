@@ -6,7 +6,7 @@ import io.flutter.embedding.android.FlutterActivity;
 import io.flutter.plugin.common.MethodChannel;
 
 public class MainActivity extends FlutterActivity {
-    private static final String CRASH_REPORT_CHANNEL = "com.quickcart.buggyapp/crash_reports";
+    private static final String CRASH_REPORT_CHANNEL = "com.pocketqa.pocketqa/crash_reports";
 
     @Override
     public void configureFlutterEngine(@NonNull FlutterEngine flutterEngine) {

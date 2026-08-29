@@ -5,6 +5,9 @@ data class TargetProfile(val kind: Kind, val repository: RepoRequest) {
     enum class Kind { LEGACY_TESTBED, QUICK_CART, GENERIC }
 
     companion object {
+        /** QuickCart now installs alongside the original mini demo app. */
+        const val QUICK_CART_PACKAGE = "com.quickcart.buggyapp"
+
         private val quickCartRepository = RepoRequest(
             url = "https://github.com/DevaanshPathak/PocketQA.git",
             ref = "main",
@@ -12,6 +15,8 @@ data class TargetProfile(val kind: Kind, val repository: RepoRequest) {
         )
 
         fun forScreen(packageName: String, labels: List<String>): TargetProfile = when {
+            packageName == QUICK_CART_PACKAGE ->
+                TargetProfile(Kind.QUICK_CART, quickCartRepository)
             labels.any { it.contains("QuickCart", ignoreCase = true) } ->
                 TargetProfile(Kind.QUICK_CART, quickCartRepository)
             packageName == PocketQaAccessibilityService.DEFAULT_TARGET_PACKAGE ->
@@ -20,6 +25,6 @@ data class TargetProfile(val kind: Kind, val repository: RepoRequest) {
         }
 
         fun defaultRepositoryFor(packageName: String) =
-            if (packageName == PocketQaAccessibilityService.DEFAULT_TARGET_PACKAGE) quickCartRepository else null
+            if (packageName == QUICK_CART_PACKAGE) quickCartRepository else null
     }
 }

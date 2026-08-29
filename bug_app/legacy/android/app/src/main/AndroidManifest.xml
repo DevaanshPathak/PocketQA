@@ -1,16 +1,13 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- Local catalogue renders without a connection; remote product images and
-         optional Firebase synchronisation need normal network access. -->
-    <uses-permission android:name="android.permission.INTERNET" />
     <permission
-        android:name="com.quickcart.buggyapp.permission.READ_CRASH_REPORT"
+        android:name="com.pocketqa.pocketqa.permission.READ_CRASH_REPORT"
         android:protectionLevel="signature" />
     <application
-        android:label="QuickCart"
+        android:label="pocketqa"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity
-            android:name="com.pocketqa.pocketqa.MainActivity"
+            android:name=".MainActivity"
             android:exported="true"
             android:launchMode="singleTop"
             android:taskAffinity=""
@@ -32,11 +29,11 @@
             </intent-filter>
         </activity>
         <provider
-            android:name="com.pocketqa.pocketqa.CrashReportProvider"
-            android:authorities="com.quickcart.buggyapp.crashes"
+            android:name=".CrashReportProvider"
+            android:authorities="com.pocketqa.pocketqa.crashes"
             android:exported="true"
             android:grantUriPermissions="false"
-            android:readPermission="com.quickcart.buggyapp.permission.READ_CRASH_REPORT" />
+            android:readPermission="com.pocketqa.pocketqa.permission.READ_CRASH_REPORT" />
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

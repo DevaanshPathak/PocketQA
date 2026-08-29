@@ -7,7 +7,7 @@ import android.database.MatrixCursor;
 import android.net.Uri;
 
 public final class CrashReportProvider extends ContentProvider {
-    static final String AUTHORITY = "com.quickcart.buggyapp.crashes";
+    static final String AUTHORITY = "com.pocketqa.pocketqa.crashes";
     static final Uri LATEST_URI = Uri.parse("content://" + AUTHORITY + "/latest");
     static final String REPORT_COLUMN = "report_json";
 
