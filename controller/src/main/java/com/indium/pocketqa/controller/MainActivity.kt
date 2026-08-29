@@ -54,6 +54,7 @@ class MainActivity : Activity() {
     private var repoCorpus: RepoCorpus? = null
     private var annotatedScreenshotPath: String? = null
     private var visualHighlightRequestedFor: String? = null
+    private var visualHighlightStatus: String? = null
     private lateinit var cloudConfig: CloudEscalationConfig
 
     // Accordion Expansion States (Collapsed by default on app launch)
@@ -87,7 +88,7 @@ class MainActivity : Activity() {
     companion object {
         // SINGLE GOAL CARD: FULL AUTONOMOUS ACTION (PER USER DIRECTIVE)
         val POCKET_GOALS = listOf(
-            PocketGoal("autonomous", "⚡", "Full Autonomous Action", "PocketQA will navigate, inspect UI semantics, test edge cases, and discover crashes autonomously across the target app.", "Scope: Unbounded Scan", TestGoal.FULL_SCAN)
+            PocketGoal("guided", "⚡", "Guided Gemma QA", "Gemma analyzes the live screen and screenshot; PocketQA executes a verified deterministic trace for fast, repeatable bug discovery.", "Offline vision + verified interaction trace", TestGoal.FULL_SCAN)
         )
     }
 
@@ -680,7 +681,7 @@ class MainActivity : Activity() {
 
         // When source is not linked, keep the diagnosis useful by locating the
         // observed defect in the captured screen rather than fabricating code.
-        val screenshotPath = snapshot.screenshotPath
+        val screenshotPath = latestAvailableScreenshot(snapshot)
         if (repoCorpus == null && screenshotPath != null && visualHighlightRequestedFor != screenshotPath) {
             visualHighlightRequestedFor = screenshotPath
             runVisualBugHighlight(finding, screenshotPath)
@@ -700,15 +701,19 @@ class MainActivity : Activity() {
                 contentContainer.addView(card)
             }
         }
+        visualHighlightStatus?.let { status ->
+            contentContainer.addView(createAccentCard("Visual Highlight", status, borderAccent = Color.parseColor("#3B82F6")))
+        }
         contentContainer.addView(createSecondaryButton("SHOW VISUAL HIGHLIGHT EXAMPLE") {
-            val path = PocketQaSessionStore.snapshot().screenshotPath
+            val path = latestAvailableScreenshot(PocketQaSessionStore.snapshot())
             if (path == null) {
                 Toast.makeText(this, "Run QuickCart once to capture a screenshot first.", Toast.LENGTH_LONG).show()
             } else {
                 annotatedScreenshotPath = null
                 visualHighlightRequestedFor = path
+                visualHighlightStatus = "Gemma is locating the issue in the captured screenshot locally…"
+                render(PocketQaSessionStore.snapshot())
                 runVisualBugHighlight(finding, path)
-                Toast.makeText(this, "Gemma is locating the bug in the captured screenshot…", Toast.LENGTH_SHORT).show()
             }
         })
 
@@ -776,7 +781,11 @@ class MainActivity : Activity() {
      */
     private fun runVisualBugHighlight(finding: BugFinding, screenshotPath: String) {
         val screenshot = File(screenshotPath)
-        val bitmap = android.graphics.BitmapFactory.decodeFile(screenshotPath) ?: return
+        val bitmap = android.graphics.BitmapFactory.decodeFile(screenshotPath) ?: run {
+            visualHighlightStatus = "Could not read the captured screenshot."
+            render(PocketQaSessionStore.snapshot())
+            return
+        }
         val width = bitmap.width
         val height = bitmap.height
         bitmap.recycle()
@@ -795,11 +804,36 @@ class MainActivity : Activity() {
             visibleLabels = labels,
         )
         modelRuntime.initialize { load ->
-            if (load !is ModelLoadResult.Ready || !ModelInstallContract.supportsVision(this)) return@initialize
+            if (load !is ModelLoadResult.Ready) {
+                runOnUiThread {
+                    visualHighlightStatus = "Local model unavailable: ${(load as? ModelLoadResult.Failed)?.message ?: "model file missing"}"
+                    render(PocketQaSessionStore.snapshot())
+                }
+                return@initialize
+            }
+            if (!ModelInstallContract.supportsVision(this)) {
+                runOnUiThread {
+                    visualHighlightStatus = "The full Gemma vision model is not installed."
+                    render(PocketQaSessionStore.snapshot())
+                }
+                return@initialize
+            }
             modelRuntime.runVisionPrompt(screenshot, prompt) { response ->
-                if (response !is ModelPromptResult.Success) return@runVisionPrompt
+                if (response !is ModelPromptResult.Success) {
+                    runOnUiThread {
+                        visualHighlightStatus = "Visual model failed: ${(response as ModelPromptResult.Failed).message}"
+                        render(PocketQaSessionStore.snapshot())
+                    }
+                    return@runVisionPrompt
+                }
                 val located = VisualBugLocator.parseLocateResponse(response.text, width, height)
-                if (located !is VisualBugLocator.LocateResult.Success) return@runVisionPrompt
+                if (located !is VisualBugLocator.LocateResult.Success) {
+                    runOnUiThread {
+                        visualHighlightStatus = "Gemma returned no usable coordinates: ${located.reason}"
+                        render(PocketQaSessionStore.snapshot())
+                    }
+                    return@runVisionPrompt
+                }
                 val marker = VisualBugHighlighter.Highlight(
                     x = located.x,
                     y = located.y,
@@ -811,16 +845,30 @@ class MainActivity : Activity() {
                     if (result is VisualBugHighlighter.AnnotationResult.Success) {
                         runOnUiThread {
                             annotatedScreenshotPath = result.value.file.absolutePath
+                            visualHighlightStatus = "Gemma highlighted the detected UI evidence."
                             PocketQaSessionStore.record(
                                 "visual",
                                 "Gemma highlighted evidence at (${located.x}, ${located.y})",
                             )
                             render(PocketQaSessionStore.snapshot())
                         }
+                    } else {
+                        runOnUiThread {
+                            visualHighlightStatus = "Could not annotate screenshot: ${(result as VisualBugHighlighter.AnnotationResult.Failed).reason}"
+                            render(PocketQaSessionStore.snapshot())
+                        }
                     }
                 }
             }
         }
+    }
+
+    private fun latestAvailableScreenshot(snapshot: SessionSnapshot): String? {
+        snapshot.screenshotPath?.takeIf { File(it).isFile }?.let { return it }
+        return File(cacheDir, "screenshots").listFiles()
+            ?.filter { it.isFile && it.extension.equals("png", ignoreCase = true) }
+            ?.maxByOrNull { it.lastModified() }
+            ?.absolutePath
     }
 
     // --- SCREEN 5: PATCH & VERIFICATION ---
