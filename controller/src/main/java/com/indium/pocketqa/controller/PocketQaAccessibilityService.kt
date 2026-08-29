@@ -276,7 +276,7 @@ class PocketQaAccessibilityService : AccessibilityService() {
         }
         val choice = assessment.actionLabel
         val coordinate = assessment.actionCoordinate
-        if (choice == null && coordinate == null) {
+        if (choice == null && coordinate == null && !assessment.goBack) {
             val detail = failure ?: "no valid action in response: ${response.take(180).replace('\n', ' ')}"
             Log.w(TAG, "Gemma autonomous response rejected: $detail")
             if (failure == null && autonomousRejectedReplies.size < MAX_MODEL_RETRIES) {
@@ -284,6 +284,17 @@ class PocketQaAccessibilityService : AccessibilityService() {
                 PocketQaSessionStore.record("model", "Gemma reply rejected; retrying with current actions")
                 handler.postDelayed({ resumeAutonomousOnTargetWindow() }, 500)
             } else stopAutonomousForModel(detail)
+            return
+        }
+        if (assessment.goBack) {
+            if (autonomousRemainingCoverage().isEmpty()) {
+                stopAutonomousForModel("model requested Back after coverage completion")
+            } else {
+                autonomousLastAction = "back"
+                PocketQaSessionStore.record("model", "Gemma selected BACK to continue coverage")
+                consumeAction("back", "Gemma autonomous")
+                performGlobalAction(GLOBAL_ACTION_BACK)
+            }
             return
         }
         if (coordinate != null) {

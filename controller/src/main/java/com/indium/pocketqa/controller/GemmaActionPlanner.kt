@@ -5,6 +5,7 @@ object GemmaActionPlanner {
     data class Assessment(
         val actionLabel: String?,
         val actionCoordinate: Pair<Int, Int>?,
+        val goBack: Boolean,
         val issueTitle: String?,
         val issueEvidence: String?,
     )
@@ -52,7 +53,8 @@ object GemmaActionPlanner {
         TAP: <one label copied exactly from Available actions>
         OR TAP_AT: <x>,<y> for a visible app control in the screenshot.
         ${if (screenWidth != null && screenHeight != null) "Coordinates must be within 0,0 to $screenWidth,$screenHeight." else ""}
-        Do not tap Android system navigation (Back/Home/Recents), do not explain,
+        OR BACK to return to the previous app screen only when coverage remains.
+        Do not use Home/Recents, do not explain,
         and do not use system settings.
 
         Screen: $screenSummary
@@ -95,6 +97,7 @@ object GemmaActionPlanner {
         return Assessment(
             actionLabel = chooseLabel(response, candidates),
             actionCoordinate = coordinate,
+            goBack = Regex("(?im)^BACK\\s*$").containsMatchIn(response),
             issueTitle = parts?.firstOrNull()?.takeUnless { it.isNullOrBlank() },
             issueEvidence = parts?.getOrNull(1)?.takeUnless { it.isBlank() },
         )
