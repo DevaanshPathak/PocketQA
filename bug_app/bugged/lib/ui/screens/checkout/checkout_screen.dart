@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../../providers/cart_provider.dart';
 import '../../../providers/order_provider.dart';
+import '../../../models/cart_item_model.dart';
 import '../../theme.dart';
 import '../order/order_confirmation_screen.dart';
 
@@ -39,7 +40,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     final orderProvider = context.watch<OrderProvider>();
     
     // BUG 03 & 13: Use stale data!
-    final cartItems = _cachedCartSnapshot ?? [];
+    final cartItems = _cachedCartSnapshot ?? <CartItemModel>[];
     final totalPayable = _cachedTotalSnapshot ?? 0.0;
 
     return Scaffold(
