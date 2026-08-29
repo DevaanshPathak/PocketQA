@@ -195,6 +195,9 @@ class MainActivity : Activity() {
 
         // Environment Info Box (TARGET & DEVICE)
         val targets = compatibleTargets()
+        if (selectedTarget?.packageName != TargetProfile.QUICK_CART_PACKAGE) {
+            selectedTarget = targets.firstOrNull()
+        }
         val envCard = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             setPadding(16, 12, 16, 12)
@@ -697,6 +700,17 @@ class MainActivity : Activity() {
                 contentContainer.addView(card)
             }
         }
+        contentContainer.addView(createSecondaryButton("SHOW VISUAL HIGHLIGHT EXAMPLE") {
+            val path = PocketQaSessionStore.snapshot().screenshotPath
+            if (path == null) {
+                Toast.makeText(this, "Run QuickCart once to capture a screenshot first.", Toast.LENGTH_LONG).show()
+            } else {
+                annotatedScreenshotPath = null
+                visualHighlightRequestedFor = path
+                runVisualBugHighlight(finding, path)
+                Toast.makeText(this, "Gemma is locating the bug in the captured screenshot…", Toast.LENGTH_SHORT).show()
+            }
+        })
 
         val confTv = createTextView("CONFIDENCE:  High (98%)", color = Color.parseColor("#4EDEA3"), textSize = 11f, bold = true, mono = true)
         confTv.setPadding(0, 0, 0, 12)
@@ -1181,13 +1195,11 @@ class MainActivity : Activity() {
         return packageManager.queryIntentActivities(intent, 0)
             .asSequence()
             .map { it.activityInfo.applicationInfo }
-            .filter { it.packageName != packageName }
-            .filter { it.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM == 0 }
+            .filter { it.packageName == TargetProfile.QUICK_CART_PACKAGE }
             .distinctBy { it.packageName }
             .map { appInfo ->
                 val label = packageManager.getApplicationLabel(appInfo).toString().ifBlank { appInfo.packageName }
-                val suffix = if (appInfo.packageName == PocketQaAccessibilityService.DEFAULT_TARGET_PACKAGE) " (Buggy App)" else ""
-                TestTarget(label + suffix, appInfo.packageName)
+                TestTarget(label, appInfo.packageName)
             }
             .sortedBy { it.label.lowercase() }
             .toList()
