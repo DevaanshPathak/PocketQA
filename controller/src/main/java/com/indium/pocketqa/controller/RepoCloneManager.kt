@@ -16,9 +16,10 @@ class RepoCloneManager(context: Context) {
     private val reposDir = File(context.filesDir, "repos").also { it.mkdirs() }
     private val allowedExtensions = setOf("kt", "java", "dart", "ts", "tsx", "js", "py", "go", "swift", "xml", "json")
 
-    fun cloneAndIndex(request: RepoRequest): RepoCorpus {
+    fun cloneAndIndex(request: RepoRequest, targetPackage: String): RepoCorpus {
         require(RepoSelection.isSafeHttpsRepoUrl(request.url)) { "Enter a credential-free HTTPS repository URL" }
         require(RepoSelection.isSafeSubfolder(request.subfolder)) { "Invalid source subfolder" }
+        require(RepoSelection.isSafePackageName(targetPackage)) { "Invalid target app" }
         val id = sha256(request.url).take(16)
         val target = File(reposDir, id)
         require(target.canonicalFile.parentFile == reposDir.canonicalFile) { "Invalid repository destination" }
@@ -32,31 +33,40 @@ class RepoCloneManager(context: Context) {
             require(selected.toPath().startsWith(target.canonicalFile.toPath())) { "Subfolder escapes repository" }
             require(selected.isDirectory) { "Selected source subfolder does not exist" }
             val corpus = RepoCorpus(target, revision, index(selected, target))
-            persistSelection(request.copy(token = ""), id, revision)
+            persistSelection(request.copy(token = ""), id, revision, targetPackage)
             return corpus
         }
     }
 
-    fun loadLast(): Pair<RepoRequest, RepoCorpus>? {
-        val state = File(reposDir, "current.json")
-        if (!state.isFile) return null
+    fun loadForTarget(targetPackage: String): Pair<RepoRequest, RepoCorpus>? {
+        if (!RepoSelection.isSafePackageName(targetPackage)) return null
+        val state = File(reposDir, RepoSelection.bindingFileName(targetPackage))
+        // One-time migration from the MVP's former single global repository binding.
+        val sourceState = when {
+            state.isFile -> state
+            File(reposDir, "current.json").isFile -> File(reposDir, "current.json")
+            else -> return null
+        }
         return runCatching {
-            val json = JSONObject(state.readText())
+            val json = JSONObject(sourceState.readText())
             val request = RepoRequest(json.getString("url"), json.getString("ref"), json.getString("subfolder"))
             val target = File(reposDir, json.getString("id")).canonicalFile
             require(target.parentFile == reposDir.canonicalFile && target.isDirectory)
             val selected = File(target, request.subfolder).canonicalFile
             require(selected.toPath().startsWith(target.toPath()) && selected.isDirectory)
-            request to RepoCorpus(target, json.getString("revision"), index(selected, target))
+            val corpus = RepoCorpus(target, json.getString("revision"), index(selected, target))
+            if (sourceState != state) persistSelection(request, json.getString("id"), corpus.revision, targetPackage)
+            request to corpus
         }.getOrNull()
     }
 
-    private fun persistSelection(request: RepoRequest, id: String, revision: String) {
+    private fun persistSelection(request: RepoRequest, id: String, revision: String, targetPackage: String) {
         val json = JSONObject().put("url", request.url).put("ref", request.ref)
             .put("subfolder", request.subfolder).put("id", id).put("revision", revision)
-        val pending = File(reposDir, "current.json.tmp")
+        val state = File(reposDir, RepoSelection.bindingFileName(targetPackage))
+        val pending = File(reposDir, "${state.name}.tmp")
         pending.writeText(json.toString())
-        Files.move(pending.toPath(), File(reposDir, "current.json").toPath(), StandardCopyOption.REPLACE_EXISTING)
+        Files.move(pending.toPath(), state.toPath(), StandardCopyOption.REPLACE_EXISTING)
     }
 
     private fun index(selected: File, repoRoot: File): List<SourceChunk> = selected.walkTopDown()

@@ -94,14 +94,6 @@ class MainActivity : Activity() {
                 render(snapshot)
             }
         }
-        Thread {
-            RepoCloneManager(this).loadLast()?.let { (request, corpus) ->
-                repoUrl = request.url; repoRef = request.ref; repoSubfolder = request.subfolder
-                repoCorpus = corpus
-                repoStatus = "Indexed ${corpus.chunks.size} chunks at ${corpus.revision.take(10)}"
-                runOnUiThread { render(PocketQaSessionStore.snapshot()) }
-            }
-        }.start()
     }
 
     private fun switchTab(tab: Tab, forceRender: Boolean = true) {
@@ -149,7 +141,11 @@ class MainActivity : Activity() {
                 setSelection(targets.indexOfFirst { it.packageName == selectedTarget?.packageName }.coerceAtLeast(0))
                 onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
                     override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                        selectedTarget = targets[position]
+                        val target = targets[position]
+                        if (selectedTarget?.packageName != target.packageName) {
+                            selectedTarget = target
+                            loadRepositoryFor(target)
+                        }
                     }
                     override fun onNothingSelected(parent: AdapterView<*>?) = Unit
                 }
@@ -187,8 +183,8 @@ class MainActivity : Activity() {
         contentContainer.addView(strategyCard)
 
         // Hero CTA Button
-        val btnRun = createPrimaryButton("START AUTONOMOUS SCAN") {
-            val target = selectedTarget
+        val btnRun = createPrimaryButton("START FULL APP SCAN") {
+            val target = selectedTarget ?: compatibleTargets().firstOrNull()?.also { selectedTarget = it }
             if (target == null) {
                 PocketQaSessionStore.fail("Select a target app first.")
             } else {
@@ -235,6 +231,10 @@ class MainActivity : Activity() {
         val tokenInput = createInput("Private repository token (optional)", "", secret = true)
         repoCard.addView(urlInput); repoCard.addView(refInput); repoCard.addView(folderInput); repoCard.addView(tokenInput)
         repoCard.addView(createPrimaryButton("CLONE & INDEX SOURCE") {
+            val target = selectedTarget ?: run {
+                repoStatus = "Select the app to test before attaching its source repository."
+                render(PocketQaSessionStore.snapshot()); return@createPrimaryButton
+            }
             repoUrl = urlInput.text.toString().trim()
             repoRef = refInput.text.toString().trim().ifBlank { "main" }
             repoSubfolder = folderInput.text.toString().trim()
@@ -242,7 +242,7 @@ class MainActivity : Activity() {
             repoStatus = "Cloning and indexing locally…"
             render(PocketQaSessionStore.snapshot())
             Thread {
-                runCatching { RepoCloneManager(this).cloneAndIndex(RepoRequest(repoUrl, repoRef, repoSubfolder, token)) }
+                runCatching { RepoCloneManager(this).cloneAndIndex(RepoRequest(repoUrl, repoRef, repoSubfolder, token), target.packageName) }
                     .onSuccess { corpus -> repoCorpus = corpus; repoStatus = "Indexed ${corpus.chunks.size} chunks at ${corpus.revision.take(10)}" }
                     .onFailure { error -> repoStatus = "Repository setup failed: ${error.message ?: error.javaClass.simpleName}" }
                 runOnUiThread { render(PocketQaSessionStore.snapshot()) }
@@ -271,6 +271,25 @@ class MainActivity : Activity() {
             render(PocketQaSessionStore.snapshot())
         })
         contentContainer.addView(cloudCard)
+    }
+
+    private fun loadRepositoryFor(target: TestTarget) {
+        repoCorpus = null
+        repoStatus = "Loading saved repository for ${target.label}â€¦"
+        Thread {
+            val binding = RepoCloneManager(this).loadForTarget(target.packageName)
+            runOnUiThread {
+                if (selectedTarget?.packageName != target.packageName) return@runOnUiThread
+                if (binding == null) {
+                    repoStatus = "No repository attached to ${target.label} yet"
+                } else {
+                    val (request, corpus) = binding
+                    repoUrl = request.url; repoRef = request.ref; repoSubfolder = request.subfolder; repoCorpus = corpus
+                    repoStatus = "Indexed ${corpus.chunks.size} chunks at ${corpus.revision.take(10)}"
+                }
+                render(PocketQaSessionStore.snapshot())
+            }
+        }.start()
     }
 
     private fun createInput(hint: String, value: String, secret: Boolean = false): EditText = EditText(this).apply {

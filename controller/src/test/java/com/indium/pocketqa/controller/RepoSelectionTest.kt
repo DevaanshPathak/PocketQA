@@ -5,6 +5,13 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class RepoSelectionTest {
+    @Test fun `uses a stable isolated binding file for each target app`() {
+        assertTrue(RepoSelection.bindingFileName("com.pocketqa.pocketqa").startsWith("target-"))
+        assertFalse(RepoSelection.bindingFileName("com.pocketqa.pocketqa") == RepoSelection.bindingFileName("com.example.other"))
+    }
+
+    @Test fun `rejects unsafe target package`() = assertFalse(RepoSelection.isSafePackageName("../../files"))
+
     @Test fun `accepts credential free https repository URL`() =
         assertTrue(RepoSelection.isSafeHttpsRepoUrl("https://github.com/acme/mobile.git"))
 
