@@ -75,7 +75,11 @@ class PocketQaAccessibilityService : AccessibilityService() {
         PocketQaSessionStore.record("run", "Starting ${goal.title} with ${mode.label}")
         testingOverlay.show("PocketQA AI\nPlanning test trace…")
         handler.removeCallbacks(timeoutRunnable)
-        activeTimeoutMs = if (mode == ExplorationMode.GEMMA_AUTONOMOUS) AUTONOMOUS_RUN_TIMEOUT_MS else RUN_TIMEOUT_MS
+        activeTimeoutMs = when (mode) {
+            ExplorationMode.GEMMA_ASSISTED -> GUIDED_GEMMA_RUN_TIMEOUT_MS
+            ExplorationMode.GEMMA_AUTONOMOUS -> AUTONOMOUS_RUN_TIMEOUT_MS
+            ExplorationMode.DETERMINISTIC -> RUN_TIMEOUT_MS
+        }
         handler.postDelayed(timeoutRunnable, activeTimeoutMs)
         ScreenshotCapture.clearCache(this)
         launchTarget()
@@ -855,6 +859,7 @@ class PocketQaAccessibilityService : AccessibilityService() {
         private const val MAX_SCREEN_LABELS = 50
         private const val AUTONOMOUS_INITIAL_WAIT_MS = 2_500L
         private const val RUN_TIMEOUT_MS = 45_000L
+        private const val GUIDED_GEMMA_RUN_TIMEOUT_MS = 120_000L
         private const val AUTONOMOUS_RUN_TIMEOUT_MS = 90_000L
         private const val CATALOG_LOAD_WINDOW_MS = 3_000L
         private const val VISUAL_ATTEMPT_LIMIT = 2
