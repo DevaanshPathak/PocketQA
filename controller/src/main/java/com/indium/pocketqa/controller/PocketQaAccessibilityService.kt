@@ -20,6 +20,7 @@ class PocketQaAccessibilityService : AccessibilityService() {
     private var explorationMode = ExplorationMode.DETERMINISTIC
     private var gemmaPlanningInFlight = false
     private var gemmaHasGuidedRun = false
+    private val autonomousVisitedLabels = mutableSetOf<String>()
     private lateinit var modelRuntime: LiteRtModelRuntime
     private val timeoutRunnable = Runnable {
         if (running) failRun("Safety timeout: exploration stopped after 30 seconds")
@@ -47,6 +48,7 @@ class PocketQaAccessibilityService : AccessibilityService() {
         explorationMode = mode
         gemmaPlanningInFlight = false
         gemmaHasGuidedRun = false
+        autonomousVisitedLabels.clear()
         targetPackage = packageName
         step = if (packageName == DEFAULT_TARGET_PACKAGE) RunStep.WAIT_CATALOG else RunStep.WAIT_GENERIC
         PocketQaSessionStore.start(goal, mode)
@@ -67,6 +69,11 @@ class PocketQaAccessibilityService : AccessibilityService() {
         testingOverlay.show("PocketQA AI\nObserving ${snapshot.label ?: "screen"}\nStep ${actionCount + 1}/$MAX_ACTIONS")
         Log.d(TAG, "STATE ${step.name}:\n${TreeFormatter.format(snapshot)}")
 
+        if (explorationMode == ExplorationMode.GEMMA_AUTONOMOUS) {
+            handleGemmaAutonomous(root, snapshot)
+            return
+        }
+
         when (step) {
             RunStep.WAIT_CATALOG -> handleCatalog(root, snapshot)
             RunStep.WAIT_CART -> handleCart(root, snapshot)
@@ -75,6 +82,65 @@ class PocketQaAccessibilityService : AccessibilityService() {
             RunStep.WAIT_GENERIC -> handleGeneric(root)
             else -> Unit
         }
+    }
+
+    /** Model-only exploration: no deterministic actions are run in this mode. */
+    private fun handleGemmaAutonomous(root: AccessibilityNodeInfo, snapshot: SemanticNode) {
+        if (gemmaPlanningInFlight) return
+        if (actionCount >= AUTONOMOUS_MAX_ACTIONS) {
+            PocketQaSessionStore.record("model", "Gemma autonomous action budget complete")
+            finishRun()
+            return
+        }
+        val candidates = clickableLabels(root)
+            .filterNot { it in autonomousVisitedLabels }
+            .take(MAX_MODEL_CANDIDATES)
+        if (candidates.isEmpty()) {
+            PocketQaSessionStore.record("model", "Gemma autonomous run stopped: no new visible actions")
+            finishRun()
+            return
+        }
+        gemmaPlanningInFlight = true
+        PocketQaSessionStore.record("model", "Gemma autonomous planner evaluating ${candidates.size} visible actions")
+        testingOverlay.show("PocketQA AI\nGemma autonomous planning on GPU…")
+        modelRuntime.initialize { load ->
+            if (load !is ModelLoadResult.Ready) {
+                handler.post { stopAutonomousForModel("model unavailable") }
+                return@initialize
+            }
+            modelRuntime.runSmokePrompt(GemmaActionPlanner.prompt(snapshot.label ?: snapshot.className, candidates)) { result ->
+                val response = (result as? ModelPromptResult.Success)?.text.orEmpty()
+                val choice = GemmaActionPlanner.chooseLabel(response, candidates)
+                handler.post { applyAutonomousChoice(choice) }
+            }
+        }
+    }
+
+    private fun applyAutonomousChoice(choice: String?) {
+        if (!running || explorationMode != ExplorationMode.GEMMA_AUTONOMOUS) return
+        gemmaPlanningInFlight = false
+        if (choice == null) {
+            stopAutonomousForModel("no valid visible action in response")
+            return
+        }
+        val root = rootInActiveWindow ?: return
+        val node = findByLabel(root, choice)
+        root.recycle()
+        if (node == null) {
+            stopAutonomousForModel("selected action disappeared: $choice")
+            return
+        }
+        autonomousVisitedLabels += choice
+        PocketQaSessionStore.record("model", "Gemma selected: $choice")
+        if (consumeAction("tap", "$choice (Gemma autonomous)")) node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+        node.recycle()
+    }
+
+    private fun stopAutonomousForModel(reason: String) {
+        if (!running || explorationMode != ExplorationMode.GEMMA_AUTONOMOUS) return
+        gemmaPlanningInFlight = false
+        PocketQaSessionStore.record("model", "Gemma autonomous run stopped: $reason (no fallback used)")
+        finishRun()
     }
 
     private fun handleCatalog(root: AccessibilityNodeInfo, snapshot: SemanticNode) {
@@ -347,6 +413,15 @@ class PocketQaAccessibilityService : AccessibilityService() {
         }
     }
 
+    private fun clickableLabels(node: AccessibilityNodeInfo): List<String> = buildList {
+        node.label()?.takeIf { node.isClickable && it.isNotBlank() }?.let(::add)
+        for (index in 0 until node.childCount) {
+            val child = node.getChild(index) ?: continue
+            addAll(clickableLabels(child))
+            child.recycle()
+        }
+    }.distinct()
+
     private fun AccessibilityNodeInfo.label(): String? = text?.toString() ?: contentDescription?.toString()
 
     private fun AccessibilityNodeInfo.toSnapshot(): SemanticNode = SemanticNode(
@@ -396,6 +471,8 @@ class PocketQaAccessibilityService : AccessibilityService() {
         fun currentReport(): String = QaReport.render(findings, running)
 
         private const val MAX_ACTIONS = 20
+        private const val AUTONOMOUS_MAX_ACTIONS = 8
+        private const val MAX_MODEL_CANDIDATES = 10
         private const val RUN_TIMEOUT_MS = 30_000L
         private const val CATALOG_LOAD_WINDOW_MS = 3_000L
     }

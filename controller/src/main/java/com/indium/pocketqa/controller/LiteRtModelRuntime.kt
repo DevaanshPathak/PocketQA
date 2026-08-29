@@ -53,6 +53,10 @@ class LiteRtModelRuntime(context: Context) : AutoCloseable {
                 onResult(ModelLoadResult.Missing(model.absolutePath))
                 return@execute
             }
+            engine?.takeIf { it.isInitialized() }?.let {
+                onResult(ModelLoadResult.Ready(initializationMs = 0, modelPath = model.absolutePath))
+                return@execute
+            }
             val startedAt = System.nanoTime()
             val result = runCatching {
                 @OptIn(ExperimentalApi::class)

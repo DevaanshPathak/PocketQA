@@ -197,10 +197,13 @@ class MainActivity : Activity() {
             }
         }
         content.addView(TextView(this).apply {
-            text = if (explorationMode == ExplorationMode.GEMMA_ASSISTED) {
-                "Gemma will select a visible action locally on the GPU; PocketQA then continues with its bounded safety trace."
-            } else {
-                "PocketQA will observe the selected app, perform bounded visible actions, and report any detected issue."
+            text = when (explorationMode) {
+                ExplorationMode.GEMMA_ASSISTED ->
+                    "Gemma will select a visible action locally on the GPU; PocketQA then continues with its bounded safety trace."
+                ExplorationMode.GEMMA_AUTONOMOUS ->
+                    "Gemma chooses every visible action locally on the GPU. No deterministic fallback is used; the run stops after 8 actions or an invalid model response."
+                ExplorationMode.DETERMINISTIC ->
+                    "PocketQA will observe the selected app, perform bounded visible actions, and report any detected issue."
             }
             setPadding(0, 16, 0, 8)
         })

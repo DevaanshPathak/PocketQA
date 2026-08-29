@@ -74,6 +74,9 @@ verification, `[ ]` not started.
 - [x] Add a selectable Gemma-assisted exploration mode: the local GPU model
   chooses one currently visible semantic action, PocketQA executes only that
   validated action, then continues with the bounded deterministic safety trace.
+- [x] Add a separate Gemma autonomous mode: the model chooses every action from
+  the current Semantics tree, with an 8-action/30-second safety bound and no
+  deterministic action fallback.
 
 ### Phase 2 — product UI
 

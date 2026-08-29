@@ -38,4 +38,12 @@ class SessionStoreTest {
 
         assertEquals(ExplorationMode.GEMMA_ASSISTED, store.snapshot().explorationMode)
     }
+
+    @Test
+    fun `an autonomous run is represented without deterministic fallback`() {
+        val store = SessionStore()
+        store.start(TestGoal.FULL_SCAN, ExplorationMode.GEMMA_AUTONOMOUS)
+
+        assertEquals(ExplorationMode.GEMMA_AUTONOMOUS, store.snapshot().explorationMode)
+    }
 }
