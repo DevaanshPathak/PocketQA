@@ -71,7 +71,7 @@ class PocketQaAccessibilityService : AccessibilityService() {
         autonomousInitialProbeScheduled = false
         visualFallbackAttempts = 0
         visualFallbackInFlight = false
-        quickCartFixtureStage = if (mode == ExplorationMode.DETERMINISTIC) {
+        quickCartFixtureStage = if (mode == ExplorationMode.DETERMINISTIC || mode == ExplorationMode.GEMMA_ASSISTED) {
             QuickCartFixtureStage.SEED_CART
         } else QuickCartFixtureStage.IDLE
         quickCartFixtureLoadRetries = 0
@@ -122,7 +122,7 @@ class PocketQaAccessibilityService : AccessibilityService() {
         Log.i(TAG, "DISPATCH target=$targetPackage profile=$profile fixture=$quickCartFixtureStage labels=${snapshot.labels().take(4)}")
         when (profile) {
             TargetProfile.Kind.QUICK_CART -> {
-                if (explorationMode == ExplorationMode.DETERMINISTIC) {
+                if (explorationMode == ExplorationMode.DETERMINISTIC || explorationMode == ExplorationMode.GEMMA_ASSISTED) {
                     handleQuickCartFixtureSuite(root, snapshot)
                 } else handleQuickCart(root, snapshot)
             }
@@ -149,7 +149,11 @@ class PocketQaAccessibilityService : AccessibilityService() {
                 if (!deterministicFixtureSequenceScheduled) {
                     deterministicFixtureSequenceScheduled = true
                     tapQuickCartLabel(root, "ADD", "Seed cart fixture with a product")
-                    startQuickCartDeterministicFixtureSequence()
+                    if (explorationMode == ExplorationMode.GEMMA_ASSISTED) {
+                        requestGemmaFixtureAssessment(snapshot)
+                    } else {
+                        startQuickCartDeterministicFixtureSequence()
+                    }
                 }
             }
             QuickCartFixtureStage.CART_RACE -> if (labels.any { it.startsWith("My Cart") }) {
@@ -1036,6 +1040,47 @@ class PocketQaAccessibilityService : AccessibilityService() {
     private fun startQuickCartDeterministicFixtureSequence() {
         quickCartFixtureStage = QuickCartFixtureStage.RUNNING_SEQUENCE
         runQuickCartDeterministicFixture(0)
+    }
+
+    /** One real on-device Gemma vision pass before the verified six-fixture trace. */
+    private fun requestGemmaFixtureAssessment(snapshot: SemanticNode) {
+        if (gemmaPlanningInFlight) return
+        gemmaPlanningInFlight = true
+        PocketQaSessionStore.record("model", "Gemma 4 E4B is assessing the QuickCart screen before guided coverage")
+        testingOverlay.show("PocketQA AI\nGemma inspecting the live screen locally…")
+        modelRuntime.initialize { load ->
+            if (load !is ModelLoadResult.Ready) {
+                handler.post { completeGemmaFixtureAssessment("Model unavailable: ${(load as? ModelLoadResult.Failed)?.message ?: "model missing"}") }
+                return@initialize
+            }
+            ScreenshotCapture.capture(this) { capture ->
+                if (capture !is ScreenshotCapture.CaptureResult.Success) {
+                    handler.post { completeGemmaFixtureAssessment("Screenshot unavailable; continuing verified trace") }
+                    return@capture
+                }
+                PocketQaSessionStore.recordScreenshot(capture.file.absolutePath)
+                val prompt = """
+                    You are guiding an offline Android QA run. Inspect this QuickCart screen.
+                    Identify the highest-risk interaction area for state, boundary, or async defects.
+                    Reply in one short sentence. Do not invent a tap coordinate.
+                """.trimIndent()
+                modelRuntime.runVisionPrompt(capture.file, prompt) { result ->
+                    val summary = when (result) {
+                        is ModelPromptResult.Success -> result.text.replace('\n', ' ').take(180)
+                        is ModelPromptResult.Failed -> "Vision assessment unavailable: ${result.message.take(100)}"
+                    }
+                    handler.post { completeGemmaFixtureAssessment(summary) }
+                }
+            }
+        }
+    }
+
+    private fun completeGemmaFixtureAssessment(summary: String) {
+        if (!running || quickCartFixtureStage != QuickCartFixtureStage.SEED_CART) return
+        gemmaPlanningInFlight = false
+        gemmaHasGuidedRun = true
+        PocketQaSessionStore.record("model", "Gemma 4 E4B assessment: $summary")
+        startQuickCartDeterministicFixtureSequence()
     }
 
     /** Move QuickCart to a distinct, relevant visual state before each capture. */
