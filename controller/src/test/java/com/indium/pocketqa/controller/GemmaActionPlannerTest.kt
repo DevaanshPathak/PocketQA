@@ -57,4 +57,16 @@ class GemmaActionPlannerTest {
         assertEquals(true, prompt.contains("numeric boundaries"))
         assertEquals(true, prompt.contains("below its minimum"))
     }
+
+    @Test
+    fun `planner accepts a vision grounded coordinate action inside the screen`() {
+        val assessment = GemmaActionPlanner.assess(
+            response = "ISSUE: NONE\nTAP_AT: 540, 960",
+            candidates = listOf("Shopping cart"),
+            screenWidth = 1080,
+            screenHeight = 2376,
+        )
+
+        assertEquals(540 to 960, assessment.actionCoordinate)
+    }
 }

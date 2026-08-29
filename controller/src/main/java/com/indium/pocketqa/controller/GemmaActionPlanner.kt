@@ -4,11 +4,17 @@ package com.indium.pocketqa.controller
 object GemmaActionPlanner {
     data class Assessment(
         val actionLabel: String?,
+        val actionCoordinate: Pair<Int, Int>?,
         val issueTitle: String?,
         val issueEvidence: String?,
     )
 
-    fun prompt(screenSummary: String, candidates: List<String>): String = """
+    fun prompt(
+        screenSummary: String,
+        candidates: List<String>,
+        screenWidth: Int? = null,
+        screenHeight: Int? = null,
+    ): String = """
         You are PocketQA, an offline Android UI test planner.
         Inspect the screen image, its Semantics summary, and every listed action
         for a reproducible UI, state, validation, or availability problem. Act
@@ -26,7 +32,10 @@ object GemmaActionPlanner {
         Reply with exactly two lines:
         ISSUE: NONE  OR  ISSUE: <short title> | <visible evidence>
         TAP: <one label copied exactly from Available actions>
-        Do not invent actions, do not explain, and do not use system settings.
+        OR TAP_AT: <x>,<y> for a visible app control in the screenshot.
+        ${if (screenWidth != null && screenHeight != null) "Coordinates must be within 0,0 to $screenWidth,$screenHeight." else ""}
+        Do not tap Android system navigation (Back/Home/Recents), do not explain,
+        and do not use system settings.
 
         Screen: $screenSummary
         Available actions:
@@ -43,7 +52,12 @@ object GemmaActionPlanner {
         return candidates.firstOrNull { it.equals(proposed, ignoreCase = true) }
     }
 
-    fun assess(response: String, candidates: List<String>): Assessment {
+    fun assess(
+        response: String,
+        candidates: List<String>,
+        screenWidth: Int? = null,
+        screenHeight: Int? = null,
+    ): Assessment {
         val issue = Regex("(?im)^ISSUE\\s*:\\s*(.+)$")
             .find(response)
             ?.groupValues
@@ -51,8 +65,17 @@ object GemmaActionPlanner {
             ?.trim()
             ?.takeUnless { it.equals("NONE", ignoreCase = true) }
         val parts = issue?.split('|', limit = 2)?.map(String::trim)
+        val coordinate = Regex("(?im)^TAP_AT\\s*:\\s*(\\d+)\\s*,\\s*(\\d+)\\s*$")
+            .find(response)
+            ?.let { it.groupValues[1].toIntOrNull() to it.groupValues[2].toIntOrNull() }
+            ?.takeIf { (x, y) ->
+                screenWidth != null && screenHeight != null && x != null && y != null &&
+                    x in 0..screenWidth && y in 0..screenHeight
+            }
+            ?.let { (x, y) -> x!! to y!! }
         return Assessment(
             actionLabel = chooseLabel(response, candidates),
+            actionCoordinate = coordinate,
             issueTitle = parts?.firstOrNull()?.takeUnless { it.isNullOrBlank() },
             issueEvidence = parts?.getOrNull(1)?.takeUnless { it.isBlank() },
         )

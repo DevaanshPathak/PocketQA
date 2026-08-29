@@ -108,6 +108,7 @@ class PocketQaAccessibilityService : AccessibilityService() {
             return
         }
         val candidates = clickableLabels(root)
+            .filterNot { it in SYSTEM_NAVIGATION_LABELS }
             .filterNot { it in autonomousVisitedLabels && it !in AUTONOMOUS_REVISITABLE_LABELS }
             .take(MAX_MODEL_CANDIDATES)
         if (candidates.isEmpty()) {
@@ -147,12 +148,27 @@ class PocketQaAccessibilityService : AccessibilityService() {
                         )
                         modelRuntime.runVisionPrompt(
                             captureResult.file,
-                            GemmaActionPlanner.prompt(screenDescription.ifBlank { snapshot.className }, candidates),
+                            GemmaActionPlanner.prompt(
+                                screenSummary = screenDescription.ifBlank { snapshot.className },
+                                candidates = candidates,
+                                screenWidth = captureResult.width,
+                                screenHeight = captureResult.height,
+                            ),
                         ) { result ->
                             val response = (result as? ModelPromptResult.Success)?.text.orEmpty()
-                            val assessment = GemmaActionPlanner.assess(response, candidates)
+                            val assessment = GemmaActionPlanner.assess(
+                                response = response,
+                                candidates = candidates,
+                                screenWidth = captureResult.width,
+                                screenHeight = captureResult.height,
+                            )
                             val failure = (result as? ModelPromptResult.Failed)?.message
-                            handler.post { applyAutonomousChoice(assessment, response, failure) }
+                            handler.post {
+                                applyAutonomousChoice(
+                                    assessment, response, failure,
+                                    captureResult.width, captureResult.height,
+                                )
+                            }
                         }
                     }
                     is ScreenshotCapture.CaptureResult.Failed -> handler.post {
@@ -163,7 +179,13 @@ class PocketQaAccessibilityService : AccessibilityService() {
         }
     }
 
-    private fun applyAutonomousChoice(assessment: GemmaActionPlanner.Assessment, response: String, failure: String?) {
+    private fun applyAutonomousChoice(
+        assessment: GemmaActionPlanner.Assessment,
+        response: String,
+        failure: String?,
+        screenWidth: Int,
+        screenHeight: Int,
+    ) {
         if (!running || explorationMode != ExplorationMode.GEMMA_AUTONOMOUS) return
         gemmaPlanningInFlight = false
         assessment.issueTitle?.let { title ->
@@ -172,12 +194,22 @@ class PocketQaAccessibilityService : AccessibilityService() {
             testingOverlay.show("PocketQA AI\nGemma found a concern\n$title")
         }
         val choice = assessment.actionLabel
-        if (choice == null) {
+        val coordinate = assessment.actionCoordinate
+        if (choice == null && coordinate == null) {
             val detail = failure ?: "no valid action in response: ${response.take(180).replace('\n', ' ')}"
             Log.w(TAG, "Gemma autonomous response rejected: $detail")
             stopAutonomousForModel(detail)
             return
         }
+        if (coordinate != null) {
+            val (x, y) = coordinate
+            PocketQaSessionStore.record("model", "Gemma selected visual tap: ($x, $y) on ${screenWidth}x${screenHeight}")
+            if (consumeAction("visual_tap", "($x, $y) (Gemma autonomous)")) {
+                GestureDispatcher.tapAt(this, x, y)
+            }
+            return
+        }
+        val label = choice ?: return
         val root = rootInActiveWindow ?: return
         if (root.packageName?.toString() != targetPackage) {
             root.recycle()
@@ -185,15 +217,15 @@ class PocketQaAccessibilityService : AccessibilityService() {
             handler.postDelayed({ resumeAutonomousOnTargetWindow() }, 400)
             return
         }
-        val node = findByLabel(root, choice)
+        val node = findByLabel(root, label)
         root.recycle()
         if (node == null) {
-            stopAutonomousForModel("selected action disappeared: $choice")
+            stopAutonomousForModel("selected action disappeared: $label")
             return
         }
-        autonomousVisitedLabels += choice
-        PocketQaSessionStore.record("model", "Gemma selected: $choice")
-        if (consumeAction("tap", "$choice (Gemma autonomous)")) node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+        autonomousVisitedLabels += label
+        PocketQaSessionStore.record("model", "Gemma selected: $label")
+        if (consumeAction("tap", "$label (Gemma autonomous)")) node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
         node.recycle()
     }
 
@@ -709,6 +741,7 @@ class PocketQaAccessibilityService : AccessibilityService() {
             "Shopping cart", "ORDER NOW", "Place Order", "Increase quantity", "Decrease quantity",
             "APPLY", "Checkout", "Your Cart",
         )
+        private val SYSTEM_NAVIGATION_LABELS = setOf("Back", "Home", "Recents", "Overview")
     }
 }
 
