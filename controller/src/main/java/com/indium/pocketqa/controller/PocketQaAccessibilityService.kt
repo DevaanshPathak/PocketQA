@@ -102,11 +102,6 @@ class PocketQaAccessibilityService : AccessibilityService() {
     /** Model-only exploration: no deterministic actions are run in this mode. */
     private fun handleGemmaAutonomous(root: AccessibilityNodeInfo, snapshot: SemanticNode) {
         if (gemmaPlanningInFlight) return
-        if (actionCount >= AUTONOMOUS_MAX_ACTIONS) {
-            PocketQaSessionStore.record("model", "Gemma autonomous action budget complete")
-            finishRun()
-            return
-        }
         val candidates = clickableLabels(root)
             .filterNot { it in SYSTEM_NAVIGATION_LABELS }
             .filterNot { it in autonomousVisitedLabels && it !in AUTONOMOUS_REVISITABLE_LABELS }
@@ -131,6 +126,7 @@ class PocketQaAccessibilityService : AccessibilityService() {
         }
         gemmaPlanningInFlight = true
         PocketQaSessionStore.record("model", "Gemma autonomous planner evaluating ${candidates.size} visible actions")
+        PocketQaSessionStore.record("model", "Gemma candidates: ${candidates.joinToString(" | ")}")
         testingOverlay.show("PocketQA AI\nGemma autonomous planning on GPU…")
         val screenDescription = snapshot.labels().take(MAX_SCREEN_LABELS).joinToString(" | ")
         modelRuntime.initialize { load ->
@@ -532,7 +528,7 @@ class PocketQaAccessibilityService : AccessibilityService() {
 
     private fun consumeAction(kind: String, detail: String): Boolean {
         actionCount += 1
-        if (actionCount > MAX_ACTIONS) {
+        if (explorationMode != ExplorationMode.GEMMA_AUTONOMOUS && actionCount > MAX_ACTIONS) {
             failRun("Action budget reached ($MAX_ACTIONS)")
             return false
         }
@@ -728,7 +724,6 @@ class PocketQaAccessibilityService : AccessibilityService() {
         fun currentReport(): String = QaReport.render(findings, running)
 
         private const val MAX_ACTIONS = 20
-        private const val AUTONOMOUS_MAX_ACTIONS = 16
         private const val MAX_MODEL_CANDIDATES = 10
         private const val MAX_SCREEN_LABELS = 50
         private const val AUTONOMOUS_INITIAL_WAIT_MS = 2_500L
@@ -739,7 +734,7 @@ class PocketQaAccessibilityService : AccessibilityService() {
         private const val SPARSE_SEMANTICS_THRESHOLD = 2
         private val AUTONOMOUS_REVISITABLE_LABELS = setOf(
             "Shopping cart", "ORDER NOW", "Place Order", "Increase quantity", "Decrease quantity",
-            "APPLY", "Checkout", "Your Cart",
+            "Checkout", "Your Cart",
         )
         private val SYSTEM_NAVIGATION_LABELS = setOf("Back", "Home", "Recents", "Overview")
     }
