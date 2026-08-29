@@ -190,11 +190,11 @@ class PocketQaAccessibilityService : AccessibilityService() {
                     } else PocketQaSessionStore.record("detector", "QuickCart quantity lower-bound check completed")
                     current.recycle()
                     step = RunStep.WAIT_CHECKOUT
-                    clickFresh("Proceed to Checkout")
+                    clickContaining("Proceed to Checkout")
                 }, 1_500)
             }
             labels.any { it == "Checkout" } && step == RunStep.WAIT_CHECKOUT -> {
-                val placeOrder = findByLabel(root, "Place Order") ?: return
+                val placeOrder = findByPrefix(root, "Place Order") ?: return
                 step = RunStep.CHECKING_CHECKOUT
                 if (consumeAction("tap", "Place Order")) placeOrder.performAction(AccessibilityNodeInfo.ACTION_CLICK)
                 placeOrder.recycle()
@@ -817,6 +817,15 @@ class PocketQaAccessibilityService : AccessibilityService() {
         if (!consumeAction("tap", prefix)) return
         val root = rootInActiveWindow ?: return
         val node = findByPrefix(root, prefix)
+        node?.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+        node?.recycle()
+        root.recycle()
+    }
+
+    private fun clickContaining(text: String) {
+        if (!consumeAction("tap", text)) return
+        val root = rootInActiveWindow ?: return
+        val node = findLabeledAction(root) { it.contains(text, ignoreCase = true) }
         node?.performAction(AccessibilityNodeInfo.ACTION_CLICK)
         node?.recycle()
         root.recycle()
