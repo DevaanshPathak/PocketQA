@@ -66,6 +66,11 @@ class PocketQaAccessibilityService : AccessibilityService() {
         if (!running || event?.packageName?.toString() != targetPackage) return
         lastEventAt = System.currentTimeMillis()
         val root = rootInActiveWindow ?: return
+        if (root.packageName?.toString() != targetPackage) {
+            root.recycle()
+            PocketQaSessionStore.record("wait", "Waiting for target app window to become active")
+            return
+        }
         val snapshot = root.toSnapshot()
         PocketQaSessionStore.record("observe", "${step.name}: ${snapshot.label ?: snapshot.className}")
         testingOverlay.show("PocketQA AI\nObserving ${snapshot.label ?: "screen"}\nStep ${actionCount + 1}/$MAX_ACTIONS")
@@ -126,19 +131,28 @@ class PocketQaAccessibilityService : AccessibilityService() {
             modelRuntime.runSmokePrompt(GemmaActionPlanner.prompt(snapshot.label ?: snapshot.className, candidates)) { result ->
                 val response = (result as? ModelPromptResult.Success)?.text.orEmpty()
                 val choice = GemmaActionPlanner.chooseLabel(response, candidates)
-                handler.post { applyAutonomousChoice(choice) }
+                val failure = (result as? ModelPromptResult.Failed)?.message
+                handler.post { applyAutonomousChoice(choice, response, failure) }
             }
         }
     }
 
-    private fun applyAutonomousChoice(choice: String?) {
+    private fun applyAutonomousChoice(choice: String?, response: String, failure: String?) {
         if (!running || explorationMode != ExplorationMode.GEMMA_AUTONOMOUS) return
         gemmaPlanningInFlight = false
         if (choice == null) {
-            stopAutonomousForModel("no valid visible action in response")
+            val detail = failure ?: "no valid action in response: ${response.take(180).replace('\n', ' ')}"
+            Log.w(TAG, "Gemma autonomous response rejected: $detail")
+            stopAutonomousForModel(detail)
             return
         }
         val root = rootInActiveWindow ?: return
+        if (root.packageName?.toString() != targetPackage) {
+            root.recycle()
+            PocketQaSessionStore.record("wait", "Gemma action deferred until the target window is active")
+            handler.postDelayed({ resumeAutonomousOnTargetWindow() }, 400)
+            return
+        }
         val node = findByLabel(root, choice)
         root.recycle()
         if (node == null) {
@@ -155,7 +169,18 @@ class PocketQaAccessibilityService : AccessibilityService() {
         if (!running || explorationMode != ExplorationMode.GEMMA_AUTONOMOUS) return
         gemmaPlanningInFlight = false
         PocketQaSessionStore.record("model", "Gemma autonomous run stopped: $reason (no fallback used)")
-        finishRun()
+        failRun("Gemma autonomous stopped: $reason")
+    }
+
+    private fun resumeAutonomousOnTargetWindow() {
+        if (!running || explorationMode != ExplorationMode.GEMMA_AUTONOMOUS || gemmaPlanningInFlight) return
+        val root = rootInActiveWindow ?: return
+        if (root.packageName?.toString() != targetPackage) {
+            root.recycle()
+            handler.postDelayed({ resumeAutonomousOnTargetWindow() }, 400)
+            return
+        }
+        handleGemmaAutonomous(root, root.toSnapshot())
     }
 
     private fun handleCatalog(root: AccessibilityNodeInfo, snapshot: SemanticNode) {
