@@ -4,6 +4,8 @@ enum class TestGoal(val title: String, val description: String) {
     CATALOG("Catalog rendering", "Check product cards and catalog semantics"),
     CART_AND_CHECKOUT("Cart and checkout", "Check cart quantities and checkout validation"),
     FULL_SCAN("Full bug scan", "Run every deterministic PocketQA check"),
+    PROFILE_FLOW("Profile update", "Check user profile updates and picture save flows"),
+    SETTINGS_FLOW("Settings update", "Check app-wide preferences and toggle behaviors"),
 }
 
 enum class ExplorationMode(val label: String) {
