@@ -34,4 +34,16 @@ class GemmaActionPlannerTest {
 
         assertEquals("Add Organic Bananas", choice)
     }
+
+    @Test
+    fun `screen assessment retains a model-reported issue and action`() {
+        val assessment = GemmaActionPlanner.assess(
+            response = "ISSUE: Cart quantity can be negative | The displayed quantity is -1\nTAP: ORDER NOW",
+            candidates = listOf("ORDER NOW", "Decrease quantity"),
+        )
+
+        assertEquals("ORDER NOW", assessment.actionLabel)
+        assertEquals("Cart quantity can be negative", assessment.issueTitle)
+        assertEquals("The displayed quantity is -1", assessment.issueEvidence)
+    }
 }

@@ -79,7 +79,7 @@ class MainActivity : Activity() {
         when {
             snapshot.status == RunStatus.RUNNING -> renderRun(snapshot)
             selectedFinding != null -> renderDiagnosis(selectedFinding!!)
-            snapshot.status == RunStatus.COMPLETE && snapshot.findings.isNotEmpty() -> renderIssueReport(snapshot)
+            snapshot.status == RunStatus.COMPLETE -> renderIssueReport(snapshot)
             else -> renderGoalPicker(snapshot)
         }
     }
@@ -283,6 +283,19 @@ class MainActivity : Activity() {
                 }
             })
         }
+        if (snapshot.findings.isEmpty()) {
+            content.addView(TextView(this).apply {
+                text = "No issue was reported in this bounded run. Review the model trace below before treating this as a pass."
+                setPadding(0, 8, 0, 16)
+                setTextColor(Color.rgb(85, 75, 35))
+            })
+        }
+        content.addView(TextView(this).apply {
+            text = "Model and action trace\n" + snapshot.actions.takeLast(24)
+                .joinToString("\n") { "${it.kind.uppercase()}: ${it.detail}" }
+            setPadding(0, 12, 0, 12)
+            setTextColor(Color.rgb(45, 45, 55))
+        })
         content.addView(Button(this).apply {
             text = "Start another run"
             setOnClickListener {

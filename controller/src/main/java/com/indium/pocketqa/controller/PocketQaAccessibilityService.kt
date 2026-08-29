@@ -123,23 +123,30 @@ class PocketQaAccessibilityService : AccessibilityService() {
         gemmaPlanningInFlight = true
         PocketQaSessionStore.record("model", "Gemma autonomous planner evaluating ${candidates.size} visible actions")
         testingOverlay.show("PocketQA AI\nGemma autonomous planning on GPU…")
+        val screenDescription = snapshot.labels().take(MAX_SCREEN_LABELS).joinToString(" | ")
         modelRuntime.initialize { load ->
             if (load !is ModelLoadResult.Ready) {
                 handler.post { stopAutonomousForModel("model unavailable") }
                 return@initialize
             }
-            modelRuntime.runSmokePrompt(GemmaActionPlanner.prompt(snapshot.label ?: snapshot.className, candidates)) { result ->
+            modelRuntime.runSmokePrompt(GemmaActionPlanner.prompt(screenDescription.ifBlank { snapshot.className }, candidates)) { result ->
                 val response = (result as? ModelPromptResult.Success)?.text.orEmpty()
-                val choice = GemmaActionPlanner.chooseLabel(response, candidates)
+                val assessment = GemmaActionPlanner.assess(response, candidates)
                 val failure = (result as? ModelPromptResult.Failed)?.message
-                handler.post { applyAutonomousChoice(choice, response, failure) }
+                handler.post { applyAutonomousChoice(assessment, response, failure) }
             }
         }
     }
 
-    private fun applyAutonomousChoice(choice: String?, response: String, failure: String?) {
+    private fun applyAutonomousChoice(assessment: GemmaActionPlanner.Assessment, response: String, failure: String?) {
         if (!running || explorationMode != ExplorationMode.GEMMA_AUTONOMOUS) return
         gemmaPlanningInFlight = false
+        assessment.issueTitle?.let { title ->
+            val evidence = assessment.issueEvidence ?: "Gemma flagged this from the current visible UI state."
+            found("Gemma: $title", evidence)
+            testingOverlay.show("PocketQA AI\nGemma found a concern\n$title")
+        }
+        val choice = assessment.actionLabel
         if (choice == null) {
             val detail = failure ?: "no valid action in response: ${response.take(180).replace('\n', ' ')}"
             Log.w(TAG, "Gemma autonomous response rejected: $detail")
@@ -513,6 +520,7 @@ class PocketQaAccessibilityService : AccessibilityService() {
         private const val MAX_ACTIONS = 20
         private const val AUTONOMOUS_MAX_ACTIONS = 8
         private const val MAX_MODEL_CANDIDATES = 10
+        private const val MAX_SCREEN_LABELS = 50
         private const val AUTONOMOUS_INITIAL_WAIT_MS = 2_500L
         private const val RUN_TIMEOUT_MS = 30_000L
         private const val CATALOG_LOAD_WINDOW_MS = 3_000L
