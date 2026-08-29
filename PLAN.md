@@ -353,6 +353,71 @@ either performs the intended gesture or safely explains the fallback.
   phone-only runtime statement match the app's actual behavior.
 - Build, install, and record the final artifacts before the final buffer.
 
+## Post-download: Gemma-only visual exploration plan
+
+**Dependency:** install the full multimodal artifact `gemma-4-E4B-it.litertlm`
+(not the 2.97 GB `-gpu` artifact). The full artifact is required before
+PocketQA may claim Gemma sees screenshots.
+
+### A. Prove image inference on the demo phone
+
+- [ ] Run a dedicated offline image smoke test using a captured Buggy App PNG
+  and `Content.ImageFile`; record model load time, vision first response, and
+  one grounded action.
+- [ ] Fail closed: if the vision encoder is absent or image inference fails,
+  show "vision unavailable" and never label the text-only path as visual AI.
+- [ ] Confirm LiteRT GPU is active in device logs and test in airplane mode.
+
+**Exit criteria:** Gemma describes a captured Buggy App screen and returns a
+valid action derived from pixels, not only Semantics text.
+
+### B. Replace autonomous navigation with a Gemma tool loop
+
+- [ ] In `GEMMA_AUTONOMOUS`, capture a screenshot on every newly observed
+  screen/state, then supply it with a compact Semantics summary and recent
+  trace.
+- [ ] Give Gemma a strict local tool schema: `inspect_screen`, `tap_label`,
+  `tap(x,y)`, `scroll(direction)`, `type(text)`, `back`, `wait`, and
+  `report_issue`.
+- [ ] Validate every tool call locally: target package, visible label, screen
+  coordinates, editable target, and one action at a time.
+- [ ] Include plus/minus controls as first-class candidates even when their
+  accessible labels are empty; use screenshot grounding plus bounds for this
+  visual-action path.
+- [ ] Re-capture after every action and have Gemma compare expected versus
+  observed state before its next tool call.
+
+**Exit criteria:** the Buggy App visibly receives Gemma-selected add, plus,
+minus, checkout, scroll, and text-input actions; every trace entry is marked
+Gemma-driven.
+
+### C. Replace the fixed action count with safe loop controls
+
+- [ ] Do not use the general 20-action budget for Gemma autonomous runs.
+- [ ] Retain Stop and use a configurable session deadline, repeated-screen
+  hash limit, repeated-action limit, invalid-tool-call limit, and thermal or
+  memory abort instead.
+- [ ] Persist screenshot/state hashes and the action trace in the active
+  session so loop termination is explainable and reproducible.
+
+**Exit criteria:** autonomous mode can visit all reachable test screens and
+stops only with a precise user, model, loop, thermal, or memory reason.
+
+### D. Make reporting and patches source-grounded
+
+- [ ] Require `report_issue` to contain title, visible evidence, trace IDs,
+  confidence, and a `sourceKey` selected only from the bundled source manifest.
+- [ ] Keep deterministic assertions out of Gemma autonomous mode; they remain
+  available only in explicitly selected deterministic/assisted modes.
+- [ ] Resolve the validated `sourceKey` through `LocalSourceLookup`; pass that
+  local excerpt, screenshot evidence, and trace to Gemma for a unified diff.
+- [ ] Validate diff headers and reject paths outside the bundled corpus. If
+  source mapping is uncertain, show evidence and say so instead of inventing
+  a patch.
+
+**Exit criteria:** every Gemma visual issue opens local source, produces a
+scoped diff or honest source-mapping uncertainty, and saves offline.
+
 ## Acceptance checks
 
 | Behavior | Evidence |
