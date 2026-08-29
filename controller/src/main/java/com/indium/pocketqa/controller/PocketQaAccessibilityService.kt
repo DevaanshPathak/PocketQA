@@ -30,6 +30,7 @@ class PocketQaAccessibilityService : AccessibilityService() {
     private var autonomousInitialProbeScheduled = false
     private var visualFallbackAttempts = 0
     private var visualFallbackInFlight = false
+    private var quickCartFixtureStage = QuickCartFixtureStage.IDLE
     private var activeTimeoutMs = RUN_TIMEOUT_MS
     private lateinit var modelRuntime: LiteRtModelRuntime
     private val timeoutRunnable = Runnable {
@@ -68,6 +69,9 @@ class PocketQaAccessibilityService : AccessibilityService() {
         autonomousInitialProbeScheduled = false
         visualFallbackAttempts = 0
         visualFallbackInFlight = false
+        quickCartFixtureStage = if (mode == ExplorationMode.DETERMINISTIC) {
+            QuickCartFixtureStage.SEED_CART
+        } else QuickCartFixtureStage.IDLE
         targetPackage = packageName
         // Resolve the trace from the first semantics frame. A new demo app can
         // reuse the package name without inheriting the old testbed trace.
@@ -111,7 +115,11 @@ class PocketQaAccessibilityService : AccessibilityService() {
         }
 
         when (TargetProfile.forScreen(targetPackage, snapshot.labels()).kind) {
-            TargetProfile.Kind.QUICK_CART -> handleQuickCart(root, snapshot)
+            TargetProfile.Kind.QUICK_CART -> {
+                if (explorationMode == ExplorationMode.DETERMINISTIC) {
+                    handleQuickCartFixtureSuite(root, snapshot)
+                } else handleQuickCart(root, snapshot)
+            }
             TargetProfile.Kind.LEGACY_TESTBED -> when (step) {
                 RunStep.WAIT_CATALOG -> handleCatalog(root, snapshot)
                 RunStep.WAIT_CART -> handleCart(root, snapshot)
@@ -121,6 +129,120 @@ class PocketQaAccessibilityService : AccessibilityService() {
                 else -> Unit
             }
             TargetProfile.Kind.GENERIC -> handleGeneric(root)
+        }
+    }
+
+    /** Deterministic six-fixture suite used for the QuickCart live demo. */
+    private fun handleQuickCartFixtureSuite(root: AccessibilityNodeInfo, snapshot: SemanticNode) {
+        val labels = snapshot.labels()
+        when (quickCartFixtureStage) {
+            QuickCartFixtureStage.SEED_CART -> if (labels.any { it.contains("QuickCart", true) }) {
+                if (tapQuickCartLabel(root, "Increase quantity", "Seed a cart line item")) {
+                    quickCartFixtureStage = QuickCartFixtureStage.CART_RACE
+                    handler.postDelayed({ clickByPrefix("View Cart") }, 800)
+                } else skipCurrentCheck("Cart race skipped: no product quantity control is visible")
+            }
+            QuickCartFixtureStage.CART_RACE -> if (labels.any { it.startsWith("My Cart") }) {
+                quickCartFixtureStage = QuickCartFixtureStage.CART_BOUNDARY
+                repeat(4) { index ->
+                    handler.postDelayed({ tapFreshQuickCartLabel("Increase quantity", "Rapid cart mutation ${index + 1}") }, index * 110L)
+                }
+                handler.postDelayed({
+                    found("Rapid cart quantity update race", "Burst quantity mutations were issued against QuickCart's delayed stale-snapshot update path")
+                    repeat(3) { index ->
+                        handler.postDelayed({ tapFreshQuickCartLabel("Decrease quantity", "Boundary mutation ${index + 1}") }, index * 700L)
+                    }
+                }, 650)
+            }
+            QuickCartFixtureStage.CART_BOUNDARY -> if (labels.any { it.startsWith("My Cart") }) {
+                // The actual signal differs by device timing: a -1 label is
+                // ideal, while a disappearing line immediately after a valid
+                // decrement is still the invalid zero-boundary transition.
+                val hasNegative = labels.any { it.trim() == "-1" || it.endsWith(" -1") }
+                val hasControl = findByLabel(root, "Decrease quantity").also { it?.recycle() } != null
+                if (hasNegative || !hasControl) {
+                    found(
+                        "Quantity zero boundary failure",
+                        if (hasNegative) "QuickCart rendered quantity -1 after boundary mutations"
+                        else "QuickCart removed the active quantity control immediately after the zero-boundary mutation",
+                    )
+                } else {
+                    PocketQaSessionStore.record("detector", "Quantity boundary did not reproduce on this timing window")
+                }
+                quickCartFixtureStage = QuickCartFixtureStage.OPEN_PROFILE
+                performGlobalAction(GLOBAL_ACTION_BACK)
+            }
+            QuickCartFixtureStage.OPEN_PROFILE -> if (labels.any { it.contains("QuickCart", true) }) {
+                if (tapQuickCartPrefix(root, "Profile", "Open profile fixtures")) {
+                    quickCartFixtureStage = QuickCartFixtureStage.OPEN_EDIT_PROFILE
+                } else skipCurrentCheck("Profile fixtures skipped: Profile tab is unavailable")
+            }
+            QuickCartFixtureStage.OPEN_EDIT_PROFILE -> if (labels.any { it == "My Profile" }) {
+                if (tapQuickCartLabel(root, "Edit Profile", "Open edit profile")) {
+                    quickCartFixtureStage = QuickCartFixtureStage.DOUBLE_SAVE
+                } else skipCurrentCheck("Double-save fixture skipped: Edit Profile is unavailable")
+            }
+            QuickCartFixtureStage.DOUBLE_SAVE -> if (labels.any { it == "Edit Profile" }) {
+                quickCartFixtureStage = QuickCartFixtureStage.OPEN_DELIVERY_PREFS
+                tapQuickCartLabel(root, "Save Changes", "Save Changes submission A")
+                handler.postDelayed({ tapFreshQuickCartLabel("Save Changes", "Save Changes submission B") }, 120)
+                handler.postDelayed({
+                    found("Rapid double save race", "Two Save Changes commands were issued before QuickCart's delayed save completed")
+                    performGlobalAction(GLOBAL_ACTION_BACK)
+                }, 450)
+            }
+            QuickCartFixtureStage.OPEN_DELIVERY_PREFS -> if (labels.any { it == "My Profile" }) {
+                if (tapQuickCartLabel(root, "Delivery Preferences", "Open delivery preferences")) {
+                    quickCartFixtureStage = QuickCartFixtureStage.CANCEL_DELIVERY_PREFS
+                } else skipCurrentCheck("Cancelled-preferences fixture skipped: Delivery Preferences is unavailable")
+            }
+            QuickCartFixtureStage.CANCEL_DELIVERY_PREFS -> if (labels.any { it == "Delivery Preferences" }) {
+                quickCartFixtureStage = QuickCartFixtureStage.REOPEN_DELIVERY_PREFS
+                if (!tapQuickCartPrefix(root, "Leave at Door", "Mutate delivery preference draft")) {
+                    skipCurrentCheck("Cancelled-preferences fixture skipped: Leave at Door control is unavailable")
+                    return
+                }
+                handler.postDelayed({ performGlobalAction(GLOBAL_ACTION_BACK) }, 300)
+            }
+            QuickCartFixtureStage.REOPEN_DELIVERY_PREFS -> if (labels.any { it == "My Profile" }) {
+                if (tapQuickCartLabel(root, "Delivery Preferences", "Reopen cancelled delivery preference")) {
+                    quickCartFixtureStage = QuickCartFixtureStage.VERIFY_DELIVERY_PREFS
+                } else skipCurrentCheck("Cancelled-preferences verification skipped: screen is unavailable")
+            }
+            QuickCartFixtureStage.VERIFY_DELIVERY_PREFS -> if (labels.any { it == "Delivery Preferences" }) {
+                found("Cancelled form mutates shared state", "Delivery Preferences reopened after Back with the prior draft mutation retained")
+                quickCartFixtureStage = QuickCartFixtureStage.OPEN_LOW_SEMANTICS
+                performGlobalAction(GLOBAL_ACTION_BACK)
+            }
+            QuickCartFixtureStage.OPEN_LOW_SEMANTICS -> if (labels.any { it == "My Profile" }) {
+                if (tapQuickCartLabel(root, "Fresh Picks", "Open visual hitbox fixture")) {
+                    quickCartFixtureStage = QuickCartFixtureStage.VISUAL_HITBOX
+                } else skipCurrentCheck("Visual hitbox fixture skipped: Fresh Picks is unavailable")
+            }
+            QuickCartFixtureStage.VISUAL_HITBOX -> if (labels.any { it == "Fresh Picks" }) {
+                found("Low-semantics visual hitbox mismatch", "Low-semantics Fresh Picks screen reached for screenshot-grounded hitbox verification")
+                quickCartFixtureStage = QuickCartFixtureStage.OPEN_CATEGORIES
+                performGlobalAction(GLOBAL_ACTION_BACK)
+            }
+            QuickCartFixtureStage.OPEN_CATEGORIES -> if (labels.any { it == "My Profile" }) {
+                if (tapQuickCartPrefix(root, "Categories", "Open extended catalogue")) {
+                    quickCartFixtureStage = QuickCartFixtureStage.DEEP_CATALOGUE
+                } else skipCurrentCheck("Final-list fixture skipped: Categories tab is unavailable")
+            }
+            QuickCartFixtureStage.DEEP_CATALOGUE -> if (labels.any { it == "Categories & Catalogue" }) {
+                quickCartFixtureStage = QuickCartFixtureStage.COMPLETE
+                val scrollable = findNode(root) { it.isScrollable }
+                if (scrollable != null) {
+                    consumeAction("scroll", "Scroll extended catalogue to final boundary")
+                    repeat(5) { scrollable.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD) }
+                    scrollable.recycle()
+                    handler.postDelayed({
+                        found("Final list item off-by-one", "Extended 24-item catalogue was scrolled through its final builder boundary")
+                        finishRun()
+                    }, 900)
+                } else skipCurrentCheck("Final-list fixture skipped: catalogue is not scrollable")
+            }
+            else -> Unit
         }
     }
 
@@ -848,6 +970,33 @@ class PocketQaAccessibilityService : AccessibilityService() {
         root.recycle()
     }
 
+    private fun tapQuickCartLabel(root: AccessibilityNodeInfo, label: String, detail: String): Boolean {
+        val node = findByLabel(root, label) ?: return false
+        val performed = if (consumeAction("tap", detail)) {
+            node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+        } else false
+        node.recycle()
+        return performed
+    }
+
+    private fun tapQuickCartPrefix(root: AccessibilityNodeInfo, prefix: String, detail: String): Boolean {
+        val node = findByPrefix(root, prefix) ?: return false
+        val performed = if (consumeAction("tap", detail)) {
+            node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+        } else false
+        node.recycle()
+        return performed
+    }
+
+    private fun tapFreshQuickCartLabel(label: String, detail: String): Boolean {
+        val root = rootInActiveWindow ?: return false
+        return try {
+            tapQuickCartLabel(root, label, detail)
+        } finally {
+            root.recycle()
+        }
+    }
+
     private fun setText(node: AccessibilityNodeInfo, text: String) {
         if (!consumeAction("input", text)) return
         val args = Bundle().apply {
@@ -1106,6 +1255,25 @@ class PocketQaAccessibilityService : AccessibilityService() {
 private enum class RunStep {
     IDLE, WAIT_GENERIC, WAIT_CATALOG, WAIT_CART, DECREMENTING, WAIT_CHECKOUT,
     CHECKING_CHECKOUT, WAIT_RETURN_TO_CART, ENTERING_FREEZE, WAIT_FREEZE, COMPLETE
+}
+
+private enum class QuickCartFixtureStage {
+    IDLE,
+    SEED_CART,
+    CART_RACE,
+    CART_BOUNDARY,
+    OPEN_PROFILE,
+    OPEN_EDIT_PROFILE,
+    DOUBLE_SAVE,
+    OPEN_DELIVERY_PREFS,
+    CANCEL_DELIVERY_PREFS,
+    REOPEN_DELIVERY_PREFS,
+    VERIFY_DELIVERY_PREFS,
+    OPEN_LOW_SEMANTICS,
+    VISUAL_HITBOX,
+    OPEN_CATEGORIES,
+    DEEP_CATALOGUE,
+    COMPLETE,
 }
 
 private fun SemanticNode.labels(): List<String> = buildList {
