@@ -99,9 +99,9 @@ class PocketQaAccessibilityService : AccessibilityService() {
         }
         val snapshot = root.toSnapshot()
         PocketQaSessionStore.record("observe", "${step.name}: ${snapshot.label ?: snapshot.className}")
-        val stepProgress = if (explorationMode == ExplorationMode.GEMMA_ASSISTED) {
-            "Task ${actionCount + 1}"
-        } else "Step ${actionCount + 1}/$MAX_ACTIONS"
+        // The action budget is an internal safety guard, not a user-facing
+        // completion target. The UI should describe current work only.
+        val stepProgress = "Task ${actionCount + 1}"
         testingOverlay.show("PocketQA AI\nObserving ${snapshot.label ?: "screen"}\n$stepProgress")
         Log.d(TAG, "STATE ${step.name}:\n${TreeFormatter.format(snapshot)}")
 
@@ -846,9 +846,7 @@ class PocketQaAccessibilityService : AccessibilityService() {
             return false
         }
         PocketQaSessionStore.record(kind, detail)
-        val actionProgress = if (explorationMode == ExplorationMode.GEMMA_ASSISTED) {
-            "Task $actionCount"
-        } else "Action $actionCount/$MAX_ACTIONS"
+        val actionProgress = "Task $actionCount"
         testingOverlay.show("PocketQA AI\nReasoning: $kind $detail\n$actionProgress")
         return true
     }
