@@ -1,0 +1,80 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+
+class UserModel {
+  final String uid;
+  final String displayName;
+  final String email;
+  final String phone;
+  final String photoUrl;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+  final String? defaultAddressId;
+  final bool isActive;
+
+  UserModel({
+    required this.uid,
+    required this.displayName,
+    required this.email,
+    this.phone = '',
+    this.photoUrl = '',
+    DateTime? createdAt,
+    DateTime? updatedAt,
+    this.defaultAddressId,
+    this.isActive = true,
+  })  : createdAt = createdAt ?? DateTime.now(),
+        updatedAt = updatedAt ?? DateTime.now();
+
+  String get phoneNumber => phone;
+
+  factory UserModel.fromMap(Map<String, dynamic> map, String id) {
+    return UserModel(
+      uid: id,
+      displayName: map['displayName'] as String? ?? '',
+      email: map['email'] as String? ?? '',
+      phone: map['phone'] as String? ?? '',
+      photoUrl: map['photoUrl'] as String? ?? '',
+      createdAt: (map['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
+      updatedAt: (map['updatedAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
+      defaultAddressId: map['defaultAddressId'] as String?,
+      isActive: map['isActive'] as bool? ?? true,
+    );
+  }
+
+  Map<String, dynamic> toMap() {
+    return {
+      'uid': uid,
+      'displayName': displayName,
+      'email': email,
+      'phone': phone,
+      'photoUrl': photoUrl,
+      'createdAt': Timestamp.fromDate(createdAt),
+      'updatedAt': Timestamp.fromDate(updatedAt),
+      'defaultAddressId': defaultAddressId,
+      'isActive': isActive,
+    };
+  }
+
+  UserModel copyWith({
+    String? displayName,
+    String? email,
+    String? phone,
+    Object? photoUrl = _sentinel,
+    String? defaultAddressId,
+    bool? isActive,
+  }) {
+    return UserModel(
+      uid: uid,
+      displayName: displayName ?? this.displayName,
+      email: email ?? this.email,
+      phone: phone ?? this.phone,
+      photoUrl: photoUrl == _sentinel ? this.photoUrl : (photoUrl as String? ?? ''),
+      createdAt: createdAt,
+      updatedAt: DateTime.now(),
+      defaultAddressId: defaultAddressId ?? this.defaultAddressId,
+      isActive: isActive ?? this.isActive,
+    );
+  }
+}
+
+// Sentinel object used to distinguish "not provided" from explicit null in copyWith.
+const Object _sentinel = Object();

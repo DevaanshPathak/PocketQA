@@ -1,12 +1,28 @@
+# IDE & Editor
+.idea/
+*.iml
+.vscode/
+
+# Build & Gradle
 .gradle/
 .kotlin/
 **/build/
-bug_app/.dart_tool/
-bug_app/.flutter-plugins*
 local.properties
 .env
+
+# Model & Artifacts
 model_artifacts/
-*.log
 *.litertlm
 __pycache__/
 *.pyc
+
+# Flutter / Dart
+**/.dart_tool/
+**/.flutter-plugins*
+**/.pub-cache/
+**/.pub/
+*.log
+
+# Excluded directories
+context/
+stitch_quickcart_buggy_grocery_app/
