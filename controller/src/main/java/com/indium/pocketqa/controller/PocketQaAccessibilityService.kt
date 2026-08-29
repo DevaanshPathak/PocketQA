@@ -991,6 +991,15 @@ class PocketQaAccessibilityService : AccessibilityService() {
         }
     }
 
+    private fun tapFreshQuickCartPrefix(prefix: String, detail: String): Boolean {
+        val root = rootInActiveWindow ?: return false
+        return try {
+            tapQuickCartPrefix(root, prefix, detail)
+        } finally {
+            root.recycle()
+        }
+    }
+
     /** Inspect only after the scheduled rapid decrements have had time to settle. */
     private fun inspectQuickCartBoundary() {
         if (!running || quickCartFixtureStage != QuickCartFixtureStage.WAIT_BOUNDARY_EVIDENCE) return
@@ -1026,24 +1035,82 @@ class PocketQaAccessibilityService : AccessibilityService() {
      */
     private fun startQuickCartDeterministicFixtureSequence() {
         quickCartFixtureStage = QuickCartFixtureStage.RUNNING_SEQUENCE
+        runQuickCartDeterministicFixture(0)
+    }
+
+    /** Move QuickCart to a distinct, relevant visual state before each capture. */
+    private fun runQuickCartDeterministicFixture(index: Int) {
+        if (!running || quickCartFixtureStage != QuickCartFixtureStage.RUNNING_SEQUENCE) return
+        when (index) {
+            0 -> {
+                tapFreshQuickCartPrefix("View Cart", "Open cart for rapid quantity test")
+                handler.postDelayed({ reportQuickCartFixture(index) }, 900)
+            }
+            1 -> {
+                tapFreshQuickCartLabel("Decrease quantity", "Exercise cart lower boundary")
+                handler.postDelayed({ reportQuickCartFixture(index) }, 900)
+            }
+            2 -> {
+                tapFreshQuickCartPrefix("Profile", "Open profile for double-save test")
+                handler.postDelayed({
+                    tapFreshQuickCartLabel("Edit Profile", "Open edit form for double-save test")
+                    handler.postDelayed({ reportQuickCartFixture(index) }, 900)
+                }, 700)
+            }
+            3 -> {
+                performGlobalAction(GLOBAL_ACTION_BACK)
+                handler.postDelayed({
+                    tapFreshQuickCartLabel("Delivery Preferences", "Open preferences for cancel isolation test")
+                    handler.postDelayed({ reportQuickCartFixture(index) }, 900)
+                }, 700)
+            }
+            4 -> {
+                performGlobalAction(GLOBAL_ACTION_BACK)
+                handler.postDelayed({
+                    tapFreshQuickCartLabel("Fresh Picks", "Open visual hitbox fixture")
+                    handler.postDelayed({ reportQuickCartFixture(index) }, 900)
+                }, 700)
+            }
+            5 -> {
+                performGlobalAction(GLOBAL_ACTION_BACK)
+                handler.postDelayed({
+                    tapFreshQuickCartPrefix("Categories", "Open extended catalogue")
+                    handler.postDelayed({
+                        val root = rootInActiveWindow
+                        root?.let {
+                            findNode(it) { node -> node.isScrollable }?.let { scroll ->
+                                consumeAction("scroll", "Traverse final catalogue boundary")
+                                repeat(4) { scroll.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD) }
+                                scroll.recycle()
+                            }
+                            it.recycle()
+                        }
+                        handler.postDelayed({ reportQuickCartFixture(index) }, 900)
+                    }, 700)
+                }, 700)
+            }
+        }
+    }
+
+    private fun reportQuickCartFixture(index: Int) {
+        if (!running || quickCartFixtureStage != QuickCartFixtureStage.RUNNING_SEQUENCE) return
         val fixtures = listOf(
-            "Rapid cart quantity update race" to "Issued a burst of cart quantity mutations and compared the resulting UI state with the computed subtotal.",
-            "Quantity zero boundary failure" to "Exercised the quantity lower bound and observed the invalid line-item transition.",
-            "Rapid double save race" to "Issued two Save Changes submissions during the same pending profile mutation.",
-            "Cancelled form mutates shared state" to "Reopened Delivery Preferences after Cancel and checked that the prior draft did not leak.",
-            "Low-semantics visual hitbox mismatch" to "Captured the Fresh Picks visual surface for screenshot-grounded hitbox verification.",
-            "Final list item off-by-one" to "Traversed the extended catalogue boundary and checked the final product index.",
+            "Rapid cart quantity update race" to "Cart evidence captured after a burst quantity-mutation trace.",
+            "Quantity zero boundary failure" to "Cart lower-bound evidence captured after a decrease mutation.",
+            "Rapid double save race" to "Edit Profile evidence captured for the duplicate Save Changes trace.",
+            "Cancelled form mutates shared state" to "Delivery Preferences evidence captured after the cancel-isolation trace.",
+            "Low-semantics visual hitbox mismatch" to "Fresh Picks evidence captured for screenshot-grounded hitbox verification.",
+            "Final list item off-by-one" to "Extended catalogue evidence captured at its final scroll boundary.",
         )
-        fixtures.forEachIndexed { index, (title, evidence) ->
-            handler.postDelayed({
-                if (!running || quickCartFixtureStage != QuickCartFixtureStage.RUNNING_SEQUENCE) return@postDelayed
-                PocketQaSessionStore.record("detector", "QuickCart fixture ${index + 1}: $title")
-                found(title, evidence)
-                if (index == fixtures.lastIndex) {
-                    quickCartFixtureStage = QuickCartFixtureStage.COMPLETE
-                    handler.postDelayed({ finishRun() }, 900)
-                }
-            }, 850L + index * 1_100L)
+        val (title, evidence) = fixtures[index]
+        PocketQaSessionStore.record("detector", "QuickCart fixture ${index + 1}: $title")
+        found(title, evidence)
+        if (index == fixtures.lastIndex) {
+            quickCartFixtureStage = QuickCartFixtureStage.COMPLETE
+            handler.postDelayed({ finishRun() }, 1_200)
+        } else {
+            // Give MediaProjection time to persist the current screen before moving on.
+            handler.postDelayed({ runQuickCartDeterministicFixture(index + 1) }, 1_600)
         }
     }
 
