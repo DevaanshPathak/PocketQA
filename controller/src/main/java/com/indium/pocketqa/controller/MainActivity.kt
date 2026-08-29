@@ -8,6 +8,7 @@ import android.content.Intent
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.text.InputType
@@ -235,7 +236,11 @@ class MainActivity : Activity() {
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { setMargins(6, 0, 0, 0) }
         }
         deviceBox.addView(createFieldLabel("DEVICE"))
-        deviceBox.addView(createTextView("📱 Pixel 7", color = Color.parseColor("#E2E1EB"), textSize = 12f, bold = true, mono = true))
+        val deviceName = listOf(Build.MANUFACTURER, Build.MODEL)
+            .filter { it.isNotBlank() }
+            .joinToString(" ")
+            .replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
+        deviceBox.addView(createTextView("Device: $deviceName", color = Color.parseColor("#E2E1EB"), textSize = 12f, bold = true, mono = true))
 
         envCard.addView(targetBox)
         envCard.addView(deviceBox)
