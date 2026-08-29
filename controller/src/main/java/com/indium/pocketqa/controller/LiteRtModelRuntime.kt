@@ -70,7 +70,10 @@ class LiteRtModelRuntime(context: Context) : AutoCloseable {
                         // An empty vision backend deliberately omits the vision executor.
                         // The full Gemma E4B artifact therefore needs this explicit GPU path.
                         visionBackend = Backend.GPU(),
-                        maxNumTokens = 512,
+                        // A screenshot consumes roughly 530 image tokens before the
+                        // action prompt or any model response. Keep enough context for
+                        // visual evidence plus a bounded tool decision.
+                        maxNumTokens = 1_024,
                         cacheDir = appContext.cacheDir.absolutePath,
                     ),
                 ).also { it.initialize() }
