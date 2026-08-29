@@ -61,6 +61,7 @@ class LiteRtModelRuntime(context: Context) : AutoCloseable {
                     EngineConfig(
                         modelPath = model.absolutePath,
                         backend = Backend.GPU(),
+                        maxNumTokens = 512,
                         cacheDir = appContext.cacheDir.absolutePath,
                     ),
                 ).also { it.initialize() }

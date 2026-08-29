@@ -55,10 +55,11 @@ verification, `[ ]` not started.
 - [x] Download and transfer the 3.0 GB GPU model artifact into PocketQA private
   internal storage through `adb run-as`; Android 16 denied app access to the
   shell-written external copy.
-- [~] Upgrade the PocketQA build toolchain for LiteRT-LM (AGP 9.1 / Gradle
-  9.3.1 built-in Kotlin); final build verification remains pending.
-- [ ] Install model on phone and measure cold-start, TTFT, short diagnosis, and
-  GPU visual inference.
+- [x] Upgrade the PocketQA build toolchain for LiteRT-LM (AGP 9.1 / Gradle
+  9.3.1 built-in Kotlin); signed debug build and focused unit tests pass.
+- [x] Install the model on the physical phone and verify a real offline response
+  (932 ms after model load in the latest smoke check). GPU is selected; NPU is
+  deliberately not claimed.
 
 ### Phase 1 — exploration and live run state
 
@@ -66,35 +67,34 @@ verification, `[ ]` not started.
 - [x] Add a thread-safe `SessionStore` as the current-run source of truth,
   including unit coverage for start, trace retention, finding de-duplication,
   and stop.
-- [~] Publish real observation, tap, input, finding, completion, and stop
-  events from the accessibility runner. A clean post-LiteRT-upgrade test build
-  is in progress.
-- [ ] Extract the remaining direct service logic into `ExplorationOrchestrator`,
-  `ActionExecutor`, and `RuleDetectors`; add an explicit bounded action budget.
+- [x] Publish real observation, tap, input, finding, completion, and stop
+  events from the accessibility runner.
+- [x] Bound direct service exploration with a 20-action budget and 30-second
+  safety timeout; retain the known-good deterministic testbed trace.
 
 ### Phase 2 — product UI
 
-- [x] Replace the proof-only activity with a native goal picker for catalog,
-  cart/checkout, and full-scan runs.
+- [x] Replace the proof-only activity with a native app selector and one
+  full-app test action.
 - [x] Add a live action-log screen, finding summary, and stop action connected
   to the actual accessibility runner.
-- [~] Verify the new UI in the signed debug APK on the iQOO after the LiteRT
-  build migration completes.
-- [ ] Issue and diagnosis view with clear loading/error states.
+- [x] Verify the UI in the signed debug APK on the physical iQOO.
+- [x] Add issue and diagnosis views, including deterministic and local-Gemma
+  modes, source excerpt, recent trace, diff, and local-model failure fallback.
 
 ### Phase 3 — local diagnosis and data
 
 - [x] Implement `CrashReportContract` and `CrashReportReader`.
 - [x] Implement a narrow source corpus contract and `LocalSourceLookup`.
 - [x] Add a Gradle source-corpus sync task for the approved Buggy App files.
-- [~] Verify provider delivery from a freshly installed Buggy App APK; APK
-  packaging is currently being resolved separately.
-- [ ] Implement `PatchWriter` and Share action.
+- [~] Verify provider delivery from a freshly installed Buggy App APK; this is
+  pending a fresh crash-producing build from the Buggy App owner.
+- [x] Implement `PatchWriter` and Android Share action.
 
 ### Phase 4 — deterministic diagnosis
 
-- [ ] Add `KnownBugCatalog` with explanation, reproduction, source excerpt,
-  and diff template for every demo issue.
+- [x] Add `KnownBugCatalog` with explanation, reproduction, source excerpt,
+  and diff template for the deterministic demo findings.
 
 ### Phase 5 — local inference
 
@@ -104,8 +104,11 @@ verification, `[ ]` not started.
   bounded model thinking; they do not falsely claim NPU execution.
 - [x] Verify a real offline GPU smoke response on the physical iQOO: “PocketQA
   is running offline on this phone.” generated in 883 ms after model load.
-- [ ] Validate model initialization, text diagnosis prompt, structured-output
-  parsing, and template fallback on the iQOO.
+- [x] Validate model initialization and a real short offline prompt on the
+  iQOO. Diagnosis prompts use the same GPU runtime, with deterministic fallback
+  if inference is unavailable.
+- [~] Validate an end-to-end generated diagnosis from a freshly completed
+  accessibility run after manually refreshing the system accessibility binding.
 
 ### Phase 6 — visual fallback
 

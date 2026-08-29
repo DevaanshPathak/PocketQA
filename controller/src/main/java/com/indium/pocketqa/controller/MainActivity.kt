@@ -9,8 +9,6 @@ import android.os.Bundle
 import android.provider.Settings
 import android.widget.Button
 import android.widget.LinearLayout
-import android.widget.RadioButton
-import android.widget.RadioGroup
 import android.widget.ScrollView
 import android.widget.Spinner
 import android.widget.TextView
@@ -23,6 +21,15 @@ class MainActivity : Activity() {
     private var modelStatus = "Model smoke test not run"
     private var selectedTarget: TestTarget? = null
     private var selectedFinding: BugFinding? = null
+    private var gemmaDiagnosis: String? = null
+    private var gemmaDiagnosisStatus: String? = null
+    private var diagnosisMode = DiagnosisMode.DETERMINISTIC
+
+    private enum class DiagnosisMode(val label: String) {
+        DETERMINISTIC("Deterministic template (fast)"),
+        GEMMA("Gemma local model (GPU)");
+        override fun toString(): String = label
+    }
 
     private data class TestTarget(val label: String, val packageName: String) {
         override fun toString(): String = label
@@ -133,7 +140,7 @@ class MainActivity : Activity() {
 
     private fun renderGoalPicker(snapshot: SessionSnapshot) {
         content.addView(TextView(this).apply {
-            text = if (snapshot.status == RunStatus.COMPLETE) "Run complete - choose another goal" else "Choose a test goal"
+            text = if (snapshot.status == RunStatus.COMPLETE) "Run complete — select another app" else "Select an app to test"
             textSize = 18f
             setPadding(0, 32, 0, 16)
         })
@@ -167,7 +174,7 @@ class MainActivity : Activity() {
             setOnClickListener {
                 val target = selectedTarget
                 if (target == null) {
-                    PocketQaSessionStore.fail("Select the Buggy App to test first.")
+                    PocketQaSessionStore.fail("Select an app to test first.")
                 } else if (!PocketQaAccessibilityService.startTestRun(TestGoal.FULL_SCAN, target.packageName)) {
                     PocketQaSessionStore.fail("Enable PocketQA Semantics Reader first.")
                 }
@@ -246,6 +253,9 @@ class MainActivity : Activity() {
                 text = "Diagnose locally"
                 setOnClickListener {
                     selectedFinding = finding
+                    gemmaDiagnosis = null
+                    gemmaDiagnosisStatus = null
+                    diagnosisMode = DiagnosisMode.DETERMINISTIC
                     render(PocketQaSessionStore.snapshot())
                 }
             })
@@ -270,7 +280,41 @@ class MainActivity : Activity() {
             setPadding(0, 28, 0, 8)
         })
         content.addView(TextView(this).apply {
-            text = "Cause\n${diagnosis.cause}\n\nReproduce\n${diagnosis.reproduction}\n\nSource: ${diagnosis.sourceKey}\n$source\n\nSuggested patch\n${diagnosis.diff}"
+            text = "Diagnosis mode"
+            textSize = 16f
+            setPadding(0, 18, 0, 4)
+        })
+        content.addView(Spinner(this).apply {
+            adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, DiagnosisMode.entries)
+            setSelection(diagnosisMode.ordinal)
+            setOnItemSelectedListener(object : android.widget.AdapterView.OnItemSelectedListener {
+                override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: android.view.View?, position: Int, id: Long) {
+                    val next = DiagnosisMode.entries[position]
+                    if (next != diagnosisMode) {
+                        diagnosisMode = next
+                        render(PocketQaSessionStore.snapshot())
+                    }
+                }
+                override fun onNothingSelected(parent: android.widget.AdapterView<*>?) = Unit
+            })
+        })
+        if (diagnosisMode == DiagnosisMode.GEMMA) {
+            content.addView(TextView(this).apply {
+                text = "\nGemma local analysis\n${gemmaDiagnosis ?: gemmaDiagnosisStatus ?: "Ready to analyze the same local source and trace."}"
+                setTextColor(Color.rgb(42, 84, 130))
+                setPadding(0, 20, 0, 4)
+            })
+            content.addView(Button(this).apply {
+                text = if (gemmaDiagnosisStatus?.startsWith("Gemma is") == true) "Gemma analyzing locally..." else "Analyze with Gemma (offline)"
+                isEnabled = gemmaDiagnosisStatus?.startsWith("Gemma is") != true
+                setOnClickListener { runGemmaDiagnosis(finding, diagnosis, source) }
+            })
+        }
+        val trace = PocketQaSessionStore.snapshot().actions.takeLast(6)
+            .joinToString("\n") { "${it.kind.uppercase()}: ${it.detail}" }
+            .ifBlank { "No recorded actions." }
+        content.addView(TextView(this).apply {
+            text = "Cause\n${diagnosis.cause}\n\nReproduce\n${diagnosis.reproduction}\n\nRecent trace\n$trace\n\nSource: ${diagnosis.sourceKey}\n$source\n\nSuggested patch\n${diagnosis.diff}"
             setTextColor(Color.rgb(30, 30, 40))
         })
         content.addView(Button(this).apply {
@@ -293,6 +337,46 @@ class MainActivity : Activity() {
                 render(PocketQaSessionStore.snapshot())
             }
         })
+    }
+
+    private fun runGemmaDiagnosis(finding: BugFinding, diagnosis: LocalDiagnosis, source: String) {
+        gemmaDiagnosis = null
+        gemmaDiagnosisStatus = "Gemma is loading locally on the GPU..."
+        render(PocketQaSessionStore.snapshot())
+        modelRuntime.initialize { load -> runOnUiThread {
+            when (load) {
+                is ModelLoadResult.Ready -> {
+                    gemmaDiagnosisStatus = "Gemma is analyzing ${diagnosis.sourceKey} locally..."
+                    render(PocketQaSessionStore.snapshot())
+                    val prompt = DiagnosisPrompt.build(
+                        finding = finding,
+                        sourceKey = diagnosis.sourceKey,
+                        sourceExcerpt = source,
+                        trace = PocketQaSessionStore.snapshot().actions,
+                    )
+                    modelRuntime.runSmokePrompt(prompt) { result -> runOnUiThread {
+                        when (result) {
+                            is ModelPromptResult.Success -> {
+                                gemmaDiagnosis = "Generated offline in ${result.elapsedMs}ms\n${result.text}"
+                                gemmaDiagnosisStatus = null
+                            }
+                            is ModelPromptResult.Failed -> {
+                                gemmaDiagnosisStatus = "Gemma unavailable: ${result.message}. Using the verified local template above."
+                            }
+                        }
+                        render(PocketQaSessionStore.snapshot())
+                    } }
+                }
+                is ModelLoadResult.Missing -> {
+                    gemmaDiagnosisStatus = "Gemma model is missing. Using the verified local template above."
+                    render(PocketQaSessionStore.snapshot())
+                }
+                is ModelLoadResult.Failed -> {
+                    gemmaDiagnosisStatus = "Gemma could not load: ${load.message}. Using the verified local template above."
+                    render(PocketQaSessionStore.snapshot())
+                }
+            }
+        } }
     }
 
     override fun onDestroy() {
