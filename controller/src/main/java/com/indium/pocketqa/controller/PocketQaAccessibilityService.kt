@@ -31,6 +31,7 @@ class PocketQaAccessibilityService : AccessibilityService() {
     private var visualFallbackAttempts = 0
     private var visualFallbackInFlight = false
     private var quickCartFixtureStage = QuickCartFixtureStage.IDLE
+    private var quickCartFixtureLoadRetries = 0
     private var activeTimeoutMs = RUN_TIMEOUT_MS
     private lateinit var modelRuntime: LiteRtModelRuntime
     private val timeoutRunnable = Runnable {
@@ -72,6 +73,7 @@ class PocketQaAccessibilityService : AccessibilityService() {
         quickCartFixtureStage = if (mode == ExplorationMode.DETERMINISTIC) {
             QuickCartFixtureStage.SEED_CART
         } else QuickCartFixtureStage.IDLE
+        quickCartFixtureLoadRetries = 0
         targetPackage = packageName
         // Resolve the trace from the first semantics frame. A new demo app can
         // reuse the package name without inheriting the old testbed trace.
@@ -140,7 +142,18 @@ class PocketQaAccessibilityService : AccessibilityService() {
                 if (tapQuickCartLabel(root, "Increase quantity", "Seed a cart line item")) {
                     quickCartFixtureStage = QuickCartFixtureStage.CART_RACE
                     handler.postDelayed({ clickByPrefix("View Cart") }, 800)
-                } else skipCurrentCheck("Cart race skipped: no product quantity control is visible")
+                } else if (quickCartFixtureLoadRetries++ < 3) {
+                    PocketQaSessionStore.record("wait", "Waiting for QuickCart product controls to load")
+                    handler.postDelayed({
+                        if (!running || quickCartFixtureStage != QuickCartFixtureStage.SEED_CART) return@postDelayed
+                        val latest = rootInActiveWindow ?: return@postDelayed
+                        try {
+                            handleQuickCartFixtureSuite(latest, latest.toSnapshot())
+                        } finally {
+                            latest.recycle()
+                        }
+                    }, CATALOG_LOAD_WINDOW_MS)
+                } else skipCurrentCheck("Cart race skipped: QuickCart product controls did not become available")
             }
             QuickCartFixtureStage.CART_RACE -> if (labels.any { it.startsWith("My Cart") }) {
                 quickCartFixtureStage = QuickCartFixtureStage.CART_BOUNDARY
