@@ -162,29 +162,21 @@ class MainActivity : Activity() {
             })
         }
         content.addView(targetPicker)
-        val goals = RadioGroup(this)
-        TestGoal.entries.forEachIndexed { index, goal ->
-            goals.addView(RadioButton(this).apply {
-                id = 100 + index
-                text = "${goal.title}\n${goal.description}"
-                contentDescription = goal.description
-                if (goal == (snapshot.goal ?: TestGoal.FULL_SCAN)) isChecked = true
-            })
-        }
         val run = Button(this).apply {
-            text = "Start exploration"
+            text = "Run full app test"
             setOnClickListener {
-                val selected = goals.checkedRadioButtonId - 100
-                val goal = TestGoal.entries.getOrElse(selected) { TestGoal.FULL_SCAN }
                 val target = selectedTarget
                 if (target == null) {
                     PocketQaSessionStore.fail("Select the Buggy App to test first.")
-                } else if (!PocketQaAccessibilityService.startTestRun(goal, target.packageName)) {
+                } else if (!PocketQaAccessibilityService.startTestRun(TestGoal.FULL_SCAN, target.packageName)) {
                     PocketQaSessionStore.fail("Enable PocketQA Semantics Reader first.")
                 }
             }
         }
-        content.addView(goals)
+        content.addView(TextView(this).apply {
+            text = "PocketQA will observe the selected app, perform bounded visible actions, and report any detected issue."
+            setPadding(0, 16, 0, 8)
+        })
         content.addView(run)
         snapshot.error?.let { message ->
             content.addView(TextView(this).apply {
@@ -196,15 +188,20 @@ class MainActivity : Activity() {
     }
 
     private fun compatibleTargets(): List<TestTarget> {
-        val targetPackage = PocketQaAccessibilityService.DEFAULT_TARGET_PACKAGE
-        val appInfo = try {
-            @Suppress("DEPRECATION")
-            packageManager.getApplicationInfo(targetPackage, 0)
-        } catch (_: PackageManager.NameNotFoundException) {
-            return emptyList()
-        }
-        val label = packageManager.getApplicationLabel(appInfo).toString().ifBlank { "Buggy App" }
-        return listOf(TestTarget("$label (Buggy App)", targetPackage))
+        val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+        return packageManager.queryIntentActivities(intent, 0)
+            .asSequence()
+            .map { it.activityInfo.applicationInfo }
+            .filter { it.packageName != packageName }
+            .filter { it.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM == 0 }
+            .distinctBy { it.packageName }
+            .map { appInfo ->
+                val label = packageManager.getApplicationLabel(appInfo).toString().ifBlank { appInfo.packageName }
+                val suffix = if (appInfo.packageName == PocketQaAccessibilityService.DEFAULT_TARGET_PACKAGE) " (Buggy App)" else ""
+                TestTarget(label + suffix, appInfo.packageName)
+            }
+            .sortedBy { it.label.lowercase() }
+            .toList()
     }
 
     private fun renderRun(snapshot: SessionSnapshot) {

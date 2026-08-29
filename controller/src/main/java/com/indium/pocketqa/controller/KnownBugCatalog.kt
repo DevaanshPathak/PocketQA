@@ -21,7 +21,7 @@ object KnownBugCatalog {
 + quantity = (quantity - 1).clamp(0, quantity);
 """.trimIndent(),
         )
-        finding.title.contains("Third", ignoreCase = true) -> LocalDiagnosis(
+        finding.title.contains("Third", ignoreCase = true) || finding.title.contains("Catalog products", ignoreCase = true) -> LocalDiagnosis(
             sourceKey = "lib/ui/screens/catalog_screen.dart",
             cause = "The catalog render path drops the final product card.",
             reproduction = "Open the catalog and inspect the rendered product cards.",

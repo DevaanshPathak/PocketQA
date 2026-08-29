@@ -16,6 +16,7 @@ class PocketQaAccessibilityService : AccessibilityService() {
     private var targetPackage = DEFAULT_TARGET_PACKAGE
     private lateinit var testingOverlay: TestingOverlay
     private var actionCount = 0
+    private var catalogProbeScheduled = false
     private val timeoutRunnable = Runnable {
         if (running) failRun("Safety timeout: exploration stopped after 30 seconds")
     }
@@ -36,8 +37,9 @@ class PocketQaAccessibilityService : AccessibilityService() {
         findings.clear()
         running = true
         actionCount = 0
+        catalogProbeScheduled = false
         targetPackage = packageName
-        step = RunStep.WAIT_CATALOG
+        step = if (packageName == DEFAULT_TARGET_PACKAGE) RunStep.WAIT_CATALOG else RunStep.WAIT_GENERIC
         PocketQaSessionStore.start(goal)
         PocketQaSessionStore.record("run", "Starting ${goal.title}")
         testingOverlay.show("PocketQA AI\nPlanning test trace…")
@@ -61,6 +63,7 @@ class PocketQaAccessibilityService : AccessibilityService() {
             RunStep.WAIT_CART -> handleCart(root, snapshot)
             RunStep.WAIT_CHECKOUT -> handleCheckout(root, snapshot)
             RunStep.WAIT_RETURN_TO_CART -> handleFreeze(root, snapshot)
+            RunStep.WAIT_GENERIC -> handleGeneric(root)
             else -> Unit
         }
     }
@@ -68,7 +71,22 @@ class PocketQaAccessibilityService : AccessibilityService() {
     private fun handleCatalog(root: AccessibilityNodeInfo, snapshot: SemanticNode) {
         if (!snapshot.hasLabel("PocketQA Testbed (Buggy)")) return
         val renderedProducts = snapshot.labels().count { it.contains('$') }
-        if (renderedProducts < 2) return
+        if (renderedProducts < 2) {
+            if (!catalogProbeScheduled) {
+                catalogProbeScheduled = true
+                PocketQaSessionStore.record("wait", "Waiting for catalog product semantics")
+                handler.postDelayed({
+                    if (!running || step != RunStep.WAIT_CATALOG) return@postDelayed
+                    val latest = rootInActiveWindow?.toSnapshot() ?: return@postDelayed
+                    val count = latest.labels().count { it.contains('$') }
+                    if (count < 2) {
+                        found("Catalog products fail to render", "Only $count product cards appeared after the catalog load window")
+                        finishRun()
+                    }
+                }, CATALOG_LOAD_WINDOW_MS)
+            }
+            return
+        }
         if (renderedProducts < 3) {
             found("Third grocery item fails to render", "Only $renderedProducts of 3 product semantics rendered")
         }
@@ -77,6 +95,28 @@ class PocketQaAccessibilityService : AccessibilityService() {
         if (consumeAction("tap", add.label() ?: "Add item")) add.performAction(AccessibilityNodeInfo.ACTION_CLICK)
         add.recycle()
         handler.postDelayed({ clickFresh("Shopping cart") }, 700)
+    }
+
+    /** Safe generic path for a user-selected non-testbed app: at most 3 labeled taps. */
+    private fun handleGeneric(root: AccessibilityNodeInfo) {
+        if (actionCount >= 3) {
+            finishRun()
+            return
+        }
+        val node = findNode(root) { candidate ->
+            candidate.isClickable && !candidate.label().isNullOrBlank()
+        } ?: run {
+            PocketQaSessionStore.record("wait", "No labeled clickable control available")
+            finishRun()
+            return
+        }
+        val label = node.label() ?: "control"
+        if (consumeAction("tap", label)) node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+        node.recycle()
+        handler.postDelayed({
+            val current = rootInActiveWindow ?: return@postDelayed
+            handleGeneric(current)
+        }, 700)
     }
 
     private fun handleCart(root: AccessibilityNodeInfo, snapshot: SemanticNode) {
@@ -292,11 +332,12 @@ class PocketQaAccessibilityService : AccessibilityService() {
 
         private const val MAX_ACTIONS = 20
         private const val RUN_TIMEOUT_MS = 30_000L
+        private const val CATALOG_LOAD_WINDOW_MS = 3_000L
     }
 }
 
 private enum class RunStep {
-    IDLE, WAIT_CATALOG, WAIT_CART, DECREMENTING, WAIT_CHECKOUT,
+    IDLE, WAIT_GENERIC, WAIT_CATALOG, WAIT_CART, DECREMENTING, WAIT_CHECKOUT,
     CHECKING_CHECKOUT, WAIT_RETURN_TO_CART, ENTERING_FREEZE, WAIT_FREEZE, COMPLETE
 }
 
