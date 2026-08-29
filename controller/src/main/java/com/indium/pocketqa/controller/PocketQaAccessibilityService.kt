@@ -14,13 +14,20 @@ class PocketQaAccessibilityService : AccessibilityService() {
     private var step = RunStep.IDLE
     private var lastEventAt = 0L
     private var targetPackage = DEFAULT_TARGET_PACKAGE
+    private lateinit var testingOverlay: TestingOverlay
+    private var actionCount = 0
+    private val timeoutRunnable = Runnable {
+        if (running) failRun("Safety timeout: exploration stopped after 30 seconds")
+    }
 
     override fun onServiceConnected() {
         instance = this
+        testingOverlay = TestingOverlay(this)
         Log.i(TAG, "PocketQA test service connected")
     }
 
     override fun onDestroy() {
+        if (::testingOverlay.isInitialized) testingOverlay.hide()
         if (instance === this) instance = null
         super.onDestroy()
     }
@@ -28,10 +35,14 @@ class PocketQaAccessibilityService : AccessibilityService() {
     private fun beginRun(goal: TestGoal, packageName: String) {
         findings.clear()
         running = true
+        actionCount = 0
         targetPackage = packageName
         step = RunStep.WAIT_CATALOG
         PocketQaSessionStore.start(goal)
         PocketQaSessionStore.record("run", "Starting ${goal.title}")
+        testingOverlay.show("PocketQA AI\nPlanning test trace…")
+        handler.removeCallbacks(timeoutRunnable)
+        handler.postDelayed(timeoutRunnable, RUN_TIMEOUT_MS)
         launchTarget()
         Log.i(TAG, "RUN STARTED: five deterministic bug checks")
     }
@@ -42,6 +53,7 @@ class PocketQaAccessibilityService : AccessibilityService() {
         val root = rootInActiveWindow ?: return
         val snapshot = root.toSnapshot()
         PocketQaSessionStore.record("observe", "${step.name}: ${snapshot.label ?: snapshot.className}")
+        testingOverlay.show("PocketQA AI\nObserving ${snapshot.label ?: "screen"}\nStep ${actionCount + 1}/$MAX_ACTIONS")
         Log.d(TAG, "STATE ${step.name}:\n${TreeFormatter.format(snapshot)}")
 
         when (step) {
@@ -62,7 +74,7 @@ class PocketQaAccessibilityService : AccessibilityService() {
         }
         val add = findByPrefix(root, "Add ") ?: return
         step = RunStep.WAIT_CART
-        add.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+        if (consumeAction("tap", add.label() ?: "Add item")) add.performAction(AccessibilityNodeInfo.ACTION_CLICK)
         add.recycle()
         handler.postDelayed({ clickFresh("Shopping cart") }, 700)
     }
@@ -71,7 +83,7 @@ class PocketQaAccessibilityService : AccessibilityService() {
         if (!snapshot.hasLabel("Your Cart")) return
         val decrease = findByLabel(root, "Decrease quantity") ?: return
         step = RunStep.DECREMENTING
-        decrease.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+        if (consumeAction("tap", "Decrease quantity")) decrease.performAction(AccessibilityNodeInfo.ACTION_CLICK)
         decrease.recycle()
         handler.postDelayed({ clickFresh("Decrease quantity") }, 450)
         handler.postDelayed({
@@ -89,7 +101,7 @@ class PocketQaAccessibilityService : AccessibilityService() {
         if (!snapshot.hasLabel("Checkout")) return
         val placeOrder = findByLabel(root, "Place Order") ?: return
         step = RunStep.CHECKING_CHECKOUT
-        placeOrder.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+        if (consumeAction("tap", "Place Order")) placeOrder.performAction(AccessibilityNodeInfo.ACTION_CLICK)
         placeOrder.recycle()
         handler.postDelayed({
             val afterEmptySubmit = rootInActiveWindow ?: return@postDelayed
@@ -104,7 +116,7 @@ class PocketQaAccessibilityService : AccessibilityService() {
                 fields.getOrNull(index)?.let { setText(it, value); it.recycle() }
             }
             val submit = findByLabel(afterEmptySubmit, "Place Order")
-            submit?.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+            if (consumeAction("tap", "Place Order")) submit?.performAction(AccessibilityNodeInfo.ACTION_CLICK)
             val stillEnabled = submit?.isEnabled == true && submit.isClickable
             submit?.recycle()
             if (stillEnabled) {
@@ -126,7 +138,7 @@ class PocketQaAccessibilityService : AccessibilityService() {
             val apply = rootInActiveWindow?.let { findByLabel(it, "APPLY") } ?: return@postDelayed
             step = RunStep.WAIT_FREEZE
             val actionAt = System.currentTimeMillis()
-            apply.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+            if (consumeAction("tap", "APPLY")) apply.performAction(AccessibilityNodeInfo.ACTION_CLICK)
             apply.recycle()
             handler.postDelayed({
                 val quietFor = System.currentTimeMillis() - lastEventAt
@@ -141,10 +153,23 @@ class PocketQaAccessibilityService : AccessibilityService() {
     private fun finishRun() {
         running = false
         step = RunStep.COMPLETE
+        handler.removeCallbacks(timeoutRunnable)
+        testingOverlay.show("PocketQA AI\nFound ${findings.size} issue(s)\nOpening diagnosis…")
         PocketQaSessionStore.record("run", "Run complete: ${findings.size} findings")
         PocketQaSessionStore.complete()
         Log.i(TAG, "RUN COMPLETE: ${findings.size}/5 bugs found")
         startActivity(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        handler.postDelayed({ testingOverlay.hide() }, 1800)
+    }
+
+    private fun failRun(message: String) {
+        running = false
+        step = RunStep.IDLE
+        handler.removeCallbacks(timeoutRunnable)
+        PocketQaSessionStore.fail(message)
+        testingOverlay.show("PocketQA AI\n$message")
+        startActivity(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        handler.postDelayed({ testingOverlay.hide() }, 1800)
     }
 
     private fun launchTarget() {
@@ -161,23 +186,35 @@ class PocketQaAccessibilityService : AccessibilityService() {
     private fun found(title: String, evidence: String) {
         if (findings.none { it.title == title }) findings += BugFinding(title, evidence)
         PocketQaSessionStore.recordFinding(BugFinding(title, evidence))
+        testingOverlay.show("PocketQA AI\nIssue found\n$title")
         Log.i(TAG, "BUG FOUND: $title - $evidence")
     }
 
     private fun clickFresh(label: String) {
+        if (!consumeAction("tap", label)) return
         val root = rootInActiveWindow ?: return
         val node = findByLabel(root, label) ?: return
         node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-        PocketQaSessionStore.record("tap", label)
         node.recycle()
     }
 
     private fun setText(node: AccessibilityNodeInfo, text: String) {
+        if (!consumeAction("input", text)) return
         val args = Bundle().apply {
             putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
         }
         node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
-        PocketQaSessionStore.record("input", text)
+    }
+
+    private fun consumeAction(kind: String, detail: String): Boolean {
+        actionCount += 1
+        if (actionCount > MAX_ACTIONS) {
+            failRun("Action budget reached ($MAX_ACTIONS)")
+            return false
+        }
+        PocketQaSessionStore.record(kind, detail)
+        testingOverlay.show("PocketQA AI\nReasoning: $kind $detail\nAction $actionCount/$MAX_ACTIONS")
+        return true
     }
 
     private fun findByLabel(node: AccessibilityNodeInfo, wanted: String): AccessibilityNodeInfo? =
@@ -245,12 +282,16 @@ class PocketQaAccessibilityService : AccessibilityService() {
             running = false
             service.step = RunStep.IDLE
             service.handler.removeCallbacksAndMessages(null)
+            service.testingOverlay.hide()
             PocketQaSessionStore.record("run", "Run stopped by user")
             PocketQaSessionStore.stop()
             return true
         }
 
         fun currentReport(): String = QaReport.render(findings, running)
+
+        private const val MAX_ACTIONS = 20
+        private const val RUN_TIMEOUT_MS = 30_000L
     }
 }
 

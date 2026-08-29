@@ -3,6 +3,7 @@ package com.indium.pocketqa.controller
 import android.app.Activity
 import android.content.pm.PackageManager
 import android.content.Intent
+import android.content.ClipData
 import android.graphics.Color
 import android.os.Bundle
 import android.provider.Settings
@@ -274,6 +275,19 @@ class MainActivity : Activity() {
         content.addView(TextView(this).apply {
             text = "Cause\n${diagnosis.cause}\n\nReproduce\n${diagnosis.reproduction}\n\nSource: ${diagnosis.sourceKey}\n$source\n\nSuggested patch\n${diagnosis.diff}"
             setTextColor(Color.rgb(30, 30, 40))
+        })
+        content.addView(Button(this).apply {
+            text = "Save and share patch"
+            setOnClickListener {
+                val patch = PatchWriter.save(this@MainActivity, diagnosis)
+                val uri = PatchWriter.uri(this@MainActivity, patch)
+                startActivity(Intent(Intent.ACTION_SEND).apply {
+                    type = "text/x-diff"
+                    putExtra(Intent.EXTRA_STREAM, uri)
+                    clipData = ClipData.newRawUri("PocketQA patch", uri)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                })
+            }
         })
         content.addView(Button(this).apply {
             text = "Back to issues"

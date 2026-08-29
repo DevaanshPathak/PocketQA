@@ -4,7 +4,7 @@ plugins {
 
 android {
     namespace = "com.indium.pocketqa.controller"
-    compileSdk = 34
+    compileSdk = 36
     buildToolsVersion = "36.0.0"
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_21
@@ -41,6 +41,7 @@ android.sourceSets.getByName("main").assets.srcDir(
 tasks.named("preBuild").configure { dependsOn(syncPocketQaSourceCorpus) }
 
 dependencies {
+    implementation("androidx.core:core-ktx:1.17.0")
     implementation("com.google.ai.edge.litertlm:litertlm-android:latest.release")
     testImplementation("junit:junit:4.13.2")
 }
