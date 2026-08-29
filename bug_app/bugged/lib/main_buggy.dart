@@ -1,15 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+
 import 'firebase_options.dart';
 import 'app.dart';
 import 'config/app_config.dart';
+import 'services/crash_reporter.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
-  );
+  CrashReporter.install();
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
   try {
     await FirebaseAuth.instance.signInAnonymously();

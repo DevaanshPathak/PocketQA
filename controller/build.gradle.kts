@@ -1,6 +1,5 @@
 plugins {
     id("com.android.application")
-    id("org.jetbrains.kotlin.android")
 }
 
 android {
@@ -22,6 +21,26 @@ android {
     }
 }
 
+val syncPocketQaSourceCorpus by tasks.registering(Copy::class) {
+    from("../bug_app/lib") {
+        include(
+            "ui/screens/catalog_screen.dart",
+            "ui/screens/cart_screen.dart",
+            "ui/screens/checkout_screen.dart",
+            "state/cart_provider.dart",
+            "ui/widgets/cart_item_tile.dart",
+        )
+    }
+    into(layout.buildDirectory.dir("generated/pocketqaSourceCorpus/assets/sources"))
+}
+
+android.sourceSets.getByName("main").assets.srcDir(
+    layout.buildDirectory.dir("generated/pocketqaSourceCorpus/assets").get().asFile,
+)
+
+tasks.named("preBuild").configure { dependsOn(syncPocketQaSourceCorpus) }
+
 dependencies {
+    implementation("com.google.ai.edge.litertlm:litertlm-android:latest.release")
     testImplementation("junit:junit:4.13.2")
 }

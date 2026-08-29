@@ -5,8 +5,13 @@
 
 # Build & Gradle
 .gradle/
+.kotlin/
 **/build/
 local.properties
+
+# Model & Artifacts
+model_artifacts/
+*.litertlm
 
 # Flutter / Dart
 **/.dart_tool/
@@ -18,3 +23,4 @@ local.properties
 # Excluded directories
 context/
 stitch_quickcart_buggy_grocery_app/
+

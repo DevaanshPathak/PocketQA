@@ -1,4 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <permission
+        android:name="com.pocketqa.pocketqa.permission.READ_CRASH_REPORT"
+        android:protectionLevel="signature" />
     <application
         android:label="pocketqa"
         android:name="${applicationName}"
@@ -25,6 +28,12 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        <provider
+            android:name=".CrashReportProvider"
+            android:authorities="com.pocketqa.pocketqa.crashes"
+            android:exported="true"
+            android:grantUriPermissions="false"
+            android:readPermission="com.pocketqa.pocketqa.permission.READ_CRASH_REPORT" />
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

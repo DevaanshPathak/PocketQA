@@ -13,6 +13,7 @@ class PocketQaAccessibilityService : AccessibilityService() {
     private val handler = Handler(Looper.getMainLooper())
     private var step = RunStep.IDLE
     private var lastEventAt = 0L
+    private var targetPackage = DEFAULT_TARGET_PACKAGE
 
     override fun onServiceConnected() {
         instance = this
@@ -24,19 +25,23 @@ class PocketQaAccessibilityService : AccessibilityService() {
         super.onDestroy()
     }
 
-    private fun beginRun() {
+    private fun beginRun(goal: TestGoal, packageName: String) {
         findings.clear()
         running = true
+        targetPackage = packageName
         step = RunStep.WAIT_CATALOG
+        PocketQaSessionStore.start(goal)
+        PocketQaSessionStore.record("run", "Starting ${goal.title}")
         launchTarget()
         Log.i(TAG, "RUN STARTED: five deterministic bug checks")
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        if (!running || event?.packageName?.toString() != TARGET_PACKAGE) return
+        if (!running || event?.packageName?.toString() != targetPackage) return
         lastEventAt = System.currentTimeMillis()
         val root = rootInActiveWindow ?: return
         val snapshot = root.toSnapshot()
+        PocketQaSessionStore.record("observe", "${step.name}: ${snapshot.label ?: snapshot.className}")
         Log.d(TAG, "STATE ${step.name}:\n${TreeFormatter.format(snapshot)}")
 
         when (step) {
@@ -136,25 +141,34 @@ class PocketQaAccessibilityService : AccessibilityService() {
     private fun finishRun() {
         running = false
         step = RunStep.COMPLETE
+        PocketQaSessionStore.record("run", "Run complete: ${findings.size} findings")
+        PocketQaSessionStore.complete()
         Log.i(TAG, "RUN COMPLETE: ${findings.size}/5 bugs found")
         startActivity(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }
 
     private fun launchTarget() {
-        val intent = packageManager.getLaunchIntentForPackage(TARGET_PACKAGE)
-            ?: return finishRun()
+        val intent = packageManager.getLaunchIntentForPackage(targetPackage)
+            ?: run {
+                PocketQaSessionStore.fail("Buggy App is not installed")
+                running = false
+                step = RunStep.IDLE
+                return
+            }
         startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
     }
 
     private fun found(title: String, evidence: String) {
         if (findings.none { it.title == title }) findings += BugFinding(title, evidence)
-        Log.i(TAG, "BUG FOUND: $title — $evidence")
+        PocketQaSessionStore.recordFinding(BugFinding(title, evidence))
+        Log.i(TAG, "BUG FOUND: $title - $evidence")
     }
 
     private fun clickFresh(label: String) {
         val root = rootInActiveWindow ?: return
         val node = findByLabel(root, label) ?: return
         node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+        PocketQaSessionStore.record("tap", label)
         node.recycle()
     }
 
@@ -163,6 +177,7 @@ class PocketQaAccessibilityService : AccessibilityService() {
             putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
         }
         node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+        PocketQaSessionStore.record("input", text)
     }
 
     private fun findByLabel(node: AccessibilityNodeInfo, wanted: String): AccessibilityNodeInfo? =
@@ -211,14 +226,27 @@ class PocketQaAccessibilityService : AccessibilityService() {
 
     companion object {
         private const val TAG = "PocketQA"
-        private const val TARGET_PACKAGE = "com.pocketqa.pocketqa"
+        const val DEFAULT_TARGET_PACKAGE = "com.pocketqa.pocketqa"
         private var instance: PocketQaAccessibilityService? = null
         private val findings = mutableListOf<BugFinding>()
         private var running = false
 
-        fun startTestRun(): Boolean {
+        fun startTestRun(
+            goal: TestGoal = TestGoal.FULL_SCAN,
+            targetPackage: String = DEFAULT_TARGET_PACKAGE,
+        ): Boolean {
             val service = instance ?: return false
-            service.beginRun()
+            service.beginRun(goal, targetPackage)
+            return true
+        }
+
+        fun stopTestRun(): Boolean {
+            val service = instance ?: return false
+            running = false
+            service.step = RunStep.IDLE
+            service.handler.removeCallbacksAndMessages(null)
+            PocketQaSessionStore.record("run", "Run stopped by user")
+            PocketQaSessionStore.stop()
             return true
         }
 
