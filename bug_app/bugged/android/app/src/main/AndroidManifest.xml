@@ -6,7 +6,7 @@
         android:name="com.pocketqa.pocketqa.permission.READ_CRASH_REPORT"
         android:protectionLevel="signature" />
     <application
-        android:label="pocketqa"
+        android:label="QuickCart"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity

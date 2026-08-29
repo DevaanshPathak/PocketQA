@@ -7,6 +7,7 @@ import '../settings/settings_screen.dart';
 import '../settings/delivery_preferences_screen.dart';
 import '../orders/orders_screen.dart';
 import '../auth/login_screen.dart';
+import '../experimental/low_semantics_screen.dart';
 
 class ProfileScreen extends StatelessWidget {
   const ProfileScreen({super.key});
@@ -153,6 +154,19 @@ class ProfileScreen extends StatelessWidget {
                     subtitle: const Text('Indiranagar, Bengaluru'),
                     trailing: const Icon(Icons.chevron_right),
                     onTap: () {},
+                  ),
+                  const Divider(height: 1),
+                  ListTile(
+                    leading: const Icon(Icons.storefront_outlined, color: QuickCartTheme.primaryGreen),
+                    title: const Text('Fresh Picks'),
+                    subtitle: const Text('Browse today\'s visual specials'),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => const LowSemanticsScreen()),
+                      );
+                    },
                   ),
                   const Divider(height: 1),
                   ListTile(

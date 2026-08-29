@@ -23,6 +23,40 @@ object KnownBugCatalog {
 + quantity = (quantity - 1).clamp(0, quantity);
 """.trimIndent(),
         )
+        finding.title.contains("Final list", ignoreCase = true) || finding.title.contains("off-by-one", ignoreCase = true) -> LocalDiagnosis(
+            sourceKey = "bug_app/bugged/lib/ui/screens/category/category_screen.dart",
+            cause = "The grid advertises one more child than the 24-item extended catalogue contains, so the final builder index is out of range.",
+            reproduction = "Open Categories, scroll to the final card, then let the grid request its last child.",
+            diff = """--- a/bug_app/bugged/lib/ui/screens/category/category_screen.dart
++++ b/bug_app/bugged/lib/ui/screens/category/category_screen.dart
+@@
+- itemCount: extendedProducts.length + 1,
++ itemCount: extendedProducts.length,
+""".trimIndent(),
+        )
+        finding.title.contains("double save", ignoreCase = true) -> LocalDiagnosis(
+            sourceKey = "bug_app/bugged/lib/ui/screens/profile/edit_profile_screen.dart",
+            cause = "Save starts a delayed asynchronous mutation without an in-flight guard, allowing two concurrent submissions.",
+            reproduction = "Edit Profile, change a field, then tap Save Changes twice before the first delay completes.",
+            diff = """--- a/bug_app/bugged/lib/ui/screens/profile/edit_profile_screen.dart
++++ b/bug_app/bugged/lib/ui/screens/profile/edit_profile_screen.dart
+@@
++ if (_isSaving) return;
++ setState(() => _isSaving = true);
+  await auth.updateProfile(...);
+""".trimIndent(),
+        )
+        finding.title.contains("hitbox", ignoreCase = true) || finding.title.contains("visual", ignoreCase = true) -> LocalDiagnosis(
+            sourceKey = "bug_app/bugged/lib/ui/screens/experimental/low_semantics_screen.dart",
+            cause = "A low-semantics product card resolves its visible Add control to the adjacent item's data.",
+            reproduction = "Open Profile > Fresh Picks, tap the visible Bananas Add button, and compare the confirmation item.",
+            diff = """--- a/bug_app/bugged/lib/ui/screens/experimental/low_semantics_screen.dart
++++ b/bug_app/bugged/lib/ui/screens/experimental/low_semantics_screen.dart
+@@
+- final added = items[(index + 1) % items.length];
++ final added = items[index];
+""".trimIndent(),
+        )
         finding.title.contains("Third", ignoreCase = true) || finding.title.contains("Catalog products", ignoreCase = true) -> LocalDiagnosis(
             sourceKey = "lib/ui/screens/catalog_screen.dart",
             cause = "The catalog render path drops the final product card.",

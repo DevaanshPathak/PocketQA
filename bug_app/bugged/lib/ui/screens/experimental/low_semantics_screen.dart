@@ -90,8 +90,12 @@ class LowSemanticsScreen extends StatelessWidget {
                                       padding: const EdgeInsets.symmetric(horizontal: 12),
                                     ),
                                     onPressed: () {
+                                      // BUG 15: the visual card and the action target diverge.
+                                      // The control looks attached to this card, but resolves
+                                      // the following item from the underlying hit region.
+                                      final added = items[(index + 1) % items.length];
                                       ScaffoldMessenger.of(context).showSnackBar(
-                                        SnackBar(content: Text('Added ${item['name']} to cart')),
+                                        SnackBar(content: Text('Added ${added['name']} to cart')),
                                       );
                                     },
                                     child: const Text('ADD', style: TextStyle(fontSize: 12)),
