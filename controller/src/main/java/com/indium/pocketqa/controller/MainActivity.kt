@@ -42,10 +42,6 @@ class MainActivity : Activity() {
     private var explorationMode = ExplorationMode.GEMMA_ASSISTED
     private var selectedGoal: PocketGoal = POCKET_GOALS[0] // Full Autonomous Action default
     private var selectedFinding: BugFinding? = null
-    private var gemmaDiagnosisStatus: String? = null
-    private var generatedPatch: String? = null
-    private var diagnosisMode = DiagnosisMode.DETERMINISTIC
-    private var isPatchApplied = false
 
     private var repoUrl = ""
     private var repoRef = "main"
@@ -66,12 +62,6 @@ class MainActivity : Activity() {
         SCANNER, MONITOR, DIAGNOSIS, ANALYTICS
     }
 
-    private enum class DiagnosisMode(val label: String) {
-        DETERMINISTIC("Deterministic Rule Catalog"),
-        GEMMA("Gemma 4 E4B GPU Local Inference");
-        override fun toString(): String = label
-    }
-
     private data class TestTarget(val label: String, val packageName: String) {
         override fun toString(): String = label
     }
@@ -86,6 +76,8 @@ class MainActivity : Activity() {
     )
 
     companion object {
+        private const val MAX_SOURCE_EXCERPT_CHARS = 12_000
+
         // SINGLE GOAL CARD: FULL AUTONOMOUS ACTION (PER USER DIRECTIVE)
         val POCKET_GOALS = listOf(
             PocketGoal("guided", "⚡", "Guided Gemma QA", "Gemma analyzes the live screen and screenshot; PocketQA executes a verified deterministic trace for fast, repeatable bug discovery.", "Offline vision + verified interaction trace", TestGoal.FULL_SCAN)
@@ -117,7 +109,7 @@ class MainActivity : Activity() {
         labelExplore = findViewById(R.id.label_explore)
         labelPatches = findViewById(R.id.label_patches)
 
-        tabStatus.setOnClickListener { switchTab(Tab.ANALYTICS) }
+        tabStatus.visibility = View.GONE
         tabLogs.setOnClickListener { switchTab(Tab.MONITOR) }
         tabExplore.setOnClickListener { switchTab(Tab.SCANNER) }
         tabPatches.setOnClickListener { switchTab(Tab.DIAGNOSIS) }
@@ -139,6 +131,13 @@ class MainActivity : Activity() {
                     tvAgentReadyChip.text = "✓ Agent: Ready"
                     tvAgentReadyChip.setTextColor(Color.parseColor("#4EDEA3"))
                     tvAgentReadyChip.setBackgroundResource(R.drawable.bg_chip_ready)
+                    if (
+                        snapshot.status == RunStatus.COMPLETE &&
+                        snapshot.findings.isNotEmpty() &&
+                        activeTab == Tab.SCANNER
+                    ) {
+                        switchTab(Tab.MONITOR, forceRender = false)
+                    }
                 }
                 render(snapshot)
             }
@@ -176,7 +175,7 @@ class MainActivity : Activity() {
         when (activeTab) {
             Tab.SCANNER -> renderScannerTab(snapshot)
             Tab.MONITOR -> renderMonitorTab(snapshot)
-            Tab.DIAGNOSIS -> if (isPatchApplied) renderPatchVerificationTab(snapshot) else renderDiagnosisTab(snapshot)
+            Tab.DIAGNOSIS -> renderDiagnosisTab(snapshot)
             Tab.ANALYTICS -> renderAnalyticsTab(snapshot)
         }
     }
@@ -328,6 +327,8 @@ class MainActivity : Activity() {
                 } else {
                     annotatedScreenshotPath = null
                     visualHighlightRequestedFor = null
+                    visualHighlightStatus = null
+                    selectedFinding = null
                     val started = PocketQaAccessibilityService.startTestRun(selectedGoal.testGoal, target.packageName, explorationMode)
                     if (!started) {
                         PocketQaSessionStore.fail("PocketQA Accessibility Service is not enabled.")
@@ -487,6 +488,25 @@ class MainActivity : Activity() {
     // --- SCREEN 2: LIVE EXPLORATION MONITOR ---
     private fun renderMonitorTab(snapshot: SessionSnapshot) {
         val isRunning = snapshot.status == RunStatus.RUNNING
+        val statusTitle = when (snapshot.status) {
+            RunStatus.IDLE -> "Ready to explore"
+            RunStatus.RUNNING -> "Exploring"
+            RunStatus.COMPLETE -> "Session complete"
+            RunStatus.STOPPED -> "Session stopped"
+            RunStatus.ERROR -> "Session failed"
+        }
+        val statusBadge = when (snapshot.status) {
+            RunStatus.IDLE -> "READY"
+            RunStatus.RUNNING -> "● ACTIVE"
+            RunStatus.COMPLETE -> "COMPLETE"
+            RunStatus.STOPPED -> "STOPPED"
+            RunStatus.ERROR -> "ERROR"
+        }
+        val statusColor = when (snapshot.status) {
+            RunStatus.RUNNING, RunStatus.COMPLETE -> Color.parseColor("#4EDEA3")
+            RunStatus.ERROR -> Color.parseColor("#FFB4AB")
+            else -> Color.parseColor("#8C909F")
+        }
 
         // Header Status Card
         val statusCard = LinearLayout(this).apply {
@@ -502,16 +522,16 @@ class MainActivity : Activity() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        titleRow.addView(createTextView(if (isRunning) "Exploring" else "Session Complete", color = Color.WHITE, textSize = 18f, bold = true))
-        titleRow.addView(createBadge(if (isRunning) "● ACTIVE" else "STOPPED", if (isRunning) Color.parseColor("#4EDEA3") else Color.parseColor("#8C909F")))
+        titleRow.addView(createTextView(statusTitle, color = Color.WHITE, textSize = 18f, bold = true))
+        titleRow.addView(createBadge(statusBadge, statusColor))
         statusCard.addView(titleRow)
 
         val goalTv = createTextView("⚑ Goal: ${selectedGoal.title}", color = Color.parseColor("#C2C6D6"), textSize = 12f)
         goalTv.setPadding(0, 4, 0, 6)
         statusCard.addView(goalTv)
 
-        statusCard.addView(createFieldLabel("ELAPSED"))
-        statusCard.addView(createTextView("01:42", color = Color.parseColor("#E2E1EB"), textSize = 13f, bold = true, mono = true))
+        statusCard.addView(createFieldLabel("DEMO FINDINGS"))
+        statusCard.addView(createTextView("${snapshot.findings.size}/${QaReport.expectedTitles.size}", color = Color.parseColor("#E2E1EB"), textSize = 13f, bold = true, mono = true))
         contentContainer.addView(statusCard)
 
         // Perception Mode Pills
@@ -539,7 +559,10 @@ class MainActivity : Activity() {
             layoutParams = lp
         }
         reasonCard.addView(createFieldLabel("REASONING"))
-        reasonCard.addView(createTextView("\"Searching for interactive elements... Semantic coverage low - switching to visual grounding.\"", color = Color.parseColor("#E2E1EB"), textSize = 12f))
+        val latestAction = snapshot.actions.lastOrNull()
+        val reasoning = latestAction?.let { "${it.kind.uppercase()}: ${it.detail}" }
+            ?: "Waiting for a PocketQA session event."
+        reasonCard.addView(createTextView(reasoning, color = Color.parseColor("#E2E1EB"), textSize = 12f))
         contentContainer.addView(reasonCard)
 
         // Live Log Terminal Container
@@ -571,35 +594,37 @@ class MainActivity : Activity() {
 
         val logText = snapshot.actions.takeLast(25).joinToString("\n") { action ->
             "[${action.kind.uppercase()}] ${action.detail}"
-        }.ifBlank { "[00:12] Screen: Profile_Screen\n[00:24] Perception: Flutter Semantics\n[00:35] Found: \"Edit Profile\" (Button)\n[00:42] Action: Tap \"Edit Profile\"\n[01:10] Action: Scroll down\n[01:25] Found: \"Save\" (Button)\n[01:40] State change observed...\n[01:42] ▋" }
+        }.ifBlank { "No session events yet." }
 
         logCard.addView(createCodeBlock(logText))
         contentContainer.addView(logCard)
 
         // Stop Exploration Button
-        val btnStop = Button(this).apply {
-            text = "⏹  Stop Exploration"
-            setTextColor(Color.parseColor("#FFB4AB"))
-            textSize = 12f
-            background = GradientDrawable().apply {
-                setColor(Color.parseColor("#1E1F26"))
-                cornerRadius = 8f
-                setStroke(1, Color.parseColor("#FFB4AB"))
+        if (isRunning) {
+            val btnStop = Button(this).apply {
+                text = "⏹  Stop Exploration"
+                setTextColor(Color.parseColor("#FFB4AB"))
+                textSize = 12f
+                background = GradientDrawable().apply {
+                    setColor(Color.parseColor("#1E1F26"))
+                    cornerRadius = 8f
+                    setStroke(1, Color.parseColor("#FFB4AB"))
+                }
+                setOnClickListener {
+                    PocketQaAccessibilityService.stopTestRun()
+                }
+                val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 42.dpToPx())
+                lp.setMargins(0, 0, 0, 14)
+                layoutParams = lp
             }
-            setOnClickListener {
-                PocketQaAccessibilityService.stopTestRun()
-            }
-            val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 42.dpToPx())
-            lp.setMargins(0, 0, 0, 14)
-            layoutParams = lp
+            contentContainer.addView(btnStop)
         }
-        contentContainer.addView(btnStop)
 
         // If findings detected, render Bug Detected Card
         snapshot.findings.forEach(::renderBugDetectedCard)
     }
 
-    // --- SCREEN 3: CRASH DETECTED CARD ---
+    // --- SCREEN 3: ISSUE DETECTED CARD ---
     private fun renderBugDetectedCard(finding: BugFinding) {
         val crashCard = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -618,13 +643,9 @@ class MainActivity : Activity() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        topRow.addView(createTextView("Bug Detected", color = Color.WHITE, textSize = 18f, bold = true))
-        topRow.addView(createBadge("⚠ CRITICAL", Color.parseColor("#FFB4AB")))
+        topRow.addView(createTextView("Issue Detected", color = Color.WHITE, textSize = 18f, bold = true))
+        topRow.addView(createBadge("DEMO FINDING", Color.parseColor("#FFB4AB")))
         crashCard.addView(topRow)
-
-        val metaTv = createTextView("ID: ERR-492-B  |  14:02:11 UTC", color = Color.parseColor("#8C909F"), textSize = 10f, mono = true)
-        metaTv.setPadding(0, 2, 0, 10)
-        crashCard.addView(metaTv)
 
         val diagnosis = KnownBugCatalog.diagnose(finding)
         crashCard.addView(createFieldLabel("OBSERVED ISSUE"))
@@ -641,7 +662,7 @@ class MainActivity : Activity() {
             })
         }
 
-        crashCard.addView(createTextView("\n<> STACK TRACE EVIDENCE", color = Color.parseColor("#8C909F"), textSize = 10f, bold = true))
+        crashCard.addView(createTextView("\nOBSERVED EVIDENCE", color = Color.parseColor("#8C909F"), textSize = 10f, bold = true))
         crashCard.addView(createCodeBlock(finding.evidence))
 
         crashCard.addView(createTextView("📈 REPRODUCTION STEPS", color = Color.parseColor("#8C909F"), textSize = 10f, bold = true))
@@ -668,7 +689,7 @@ class MainActivity : Activity() {
         contentContainer.addView(crashCard)
     }
 
-    // --- SCREEN 4: AI DIAGNOSIS & DIFFER ---
+    // --- SCREEN 4: SOURCE-GROUNDED DIAGNOSIS & DIFF ---
     private fun renderDiagnosisTab(snapshot: SessionSnapshot) {
         val finding = selectedFinding ?: snapshot.findings.firstOrNull()
         if (finding == null) {
@@ -687,8 +708,8 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(0, 0, 0, 8)
         }
-        titleRow.addView(createTextView("AI Diagnosis", color = Color.WHITE, textSize = 22f, bold = true))
-        titleRow.addView(createBadge("✓ ANALYSIS COMPLETE", Color.parseColor("#4EDEA3")))
+        titleRow.addView(createTextView("Diagnosis", color = Color.WHITE, textSize = 22f, bold = true))
+        titleRow.addView(createBadge("✓ SOURCE MAPPED", Color.parseColor("#4EDEA3")))
         contentContainer.addView(titleRow)
 
         // When source is not linked, keep the diagnosis useful by locating the
@@ -716,7 +737,7 @@ class MainActivity : Activity() {
         visualHighlightStatus?.let { status ->
             contentContainer.addView(createAccentCard("Visual Highlight", status, borderAccent = Color.parseColor("#3B82F6")))
         }
-        contentContainer.addView(createSecondaryButton("SHOW VISUAL HIGHLIGHT EXAMPLE") {
+        contentContainer.addView(createSecondaryButton("LOCATE ISSUE IN SCREENSHOT") {
             val path = latestAvailableScreenshot(PocketQaSessionStore.snapshot(), finding)
             if (path == null) {
                 Toast.makeText(this, "Run QuickCart once to capture a screenshot first.", Toast.LENGTH_LONG).show()
@@ -729,9 +750,9 @@ class MainActivity : Activity() {
             }
         })
 
-        val confTv = createTextView("CONFIDENCE:  High (98%)", color = Color.parseColor("#4EDEA3"), textSize = 11f, bold = true, mono = true)
-        confTv.setPadding(0, 0, 0, 12)
-        contentContainer.addView(confTv)
+        val mappingTv = createTextView("DIAGNOSIS: deterministic demo catalog", color = Color.parseColor("#4EDEA3"), textSize = 11f, bold = true, mono = true)
+        mappingTv.setPadding(0, 0, 0, 12)
+        contentContainer.addView(mappingTv)
 
         val causeCard = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -745,6 +766,19 @@ class MainActivity : Activity() {
         causeCard.addView(createTextView(diagnosis.cause, color = Color.parseColor("#E2E1EB"), textSize = 13f))
         causeCard.addView(createCodeBlock("{} AFFECTED TARGET\n${diagnosis.sourceKey}"))
         contentContainer.addView(causeCard)
+
+        val bundledSource = LocalSourceLookup(this).read(diagnosis.sourceKey)
+        val sourceCard = createCard(
+            "Bundled Source Evidence",
+            if (bundledSource == null) "Source asset unavailable" else "Offline excerpt from ${diagnosis.sourceKey}",
+        )
+        sourceCard.addView(
+            createCodeBlock(
+                bundledSource?.take(MAX_SOURCE_EXCERPT_CHARS)
+                    ?: "PocketQA could not load the bundled source asset for this finding.",
+            ),
+        )
+        contentContainer.addView(sourceCard)
 
         val diffCard = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -764,11 +798,11 @@ class MainActivity : Activity() {
         legendRow.addView(createBadge("● ADDED", Color.parseColor("#4EDEA3")))
         diffCard.addView(legendRow)
 
-        diffCard.addView(createDiffBlock(generatedPatch ?: diagnosis.diff))
+        diffCard.addView(createDiffBlock(diagnosis.diff))
         contentContainer.addView(diffCard)
 
-        val btnApply = Button(this).apply {
-            text = "🔧  Apply Patch"
+        val btnExport = Button(this).apply {
+            text = "↗  Export Patch"
             setTextColor(Color.parseColor("#12131A"))
             textSize = 13f
             typeface = Typeface.DEFAULT_BOLD
@@ -777,14 +811,13 @@ class MainActivity : Activity() {
                 cornerRadius = 8f
             }
             setOnClickListener {
-                isPatchApplied = true
-                render(PocketQaSessionStore.snapshot())
+                exportPatch(diagnosis)
             }
             val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 46.dpToPx())
             lp.setMargins(0, 4, 0, 10)
             layoutParams = lp
         }
-        contentContainer.addView(btnApply)
+        contentContainer.addView(btnExport)
     }
 
     /**
@@ -884,89 +917,31 @@ class MainActivity : Activity() {
             ?.absolutePath
     }
 
-    // --- SCREEN 5: PATCH & VERIFICATION ---
-    private fun renderPatchVerificationTab(snapshot: SessionSnapshot) {
-        val heroCard = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER_HORIZONTAL
-            setPadding(20, 24, 20, 24)
-            val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-            lp.setMargins(0, 0, 0, 14)
-            layoutParams = lp
+    private fun exportPatch(diagnosis: LocalDiagnosis) {
+        val file = runCatching { PatchWriter.save(this, diagnosis) }.getOrElse { error ->
+            Toast.makeText(this, "Could not export patch: ${error.message}", Toast.LENGTH_LONG).show()
+            return
         }
-
-        val checkBadge = TextView(this).apply {
-            text = "✓"
-            setTextColor(Color.parseColor("#4EDEA3"))
-            textSize = 28f
-            gravity = Gravity.CENTER
-            setPadding(16, 12, 16, 12)
-            background = GradientDrawable().apply {
-                setColor(Color.parseColor("#1A2B23"))
-                cornerRadius = 30f
-                setStroke(2, Color.parseColor("#4EDEA3"))
-            }
+        val uri = PatchWriter.uri(this, file)
+        val shareIntent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/x-diff"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            putExtra(Intent.EXTRA_TITLE, file.name)
+            clipData = ClipData.newRawUri("PocketQA patch", uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
-        heroCard.addView(checkBadge)
-
-        val titleTv = createTextView("Patch Applied", color = Color.parseColor("#4EDEA3"), textSize = 22f, bold = true)
-        titleTv.setPadding(0, 10, 0, 2)
-        heroCard.addView(titleTv)
-        heroCard.addView(createTextView("Verification Passed", color = Color.parseColor("#C2C6D6"), textSize = 13f))
-        contentContainer.addView(heroCard)
-
-        val outcomeCard = createCard("Outcome", "")
-        outcomeCard.addView(createTextView("🐛 Bug Fixed. The crash no longer reproduces.", color = Color.parseColor("#E2E1EB"), textSize = 13f))
-        outcomeCard.addView(createCodeBlock("Updated profile_screen.dart in target_app repository."))
-        contentContainer.addView(outcomeCard)
-
-        val timelineCard = createCard("Deployment Timeline", "")
-        val steps = listOf(
-            "Generating patch [Complete]",
-            "Sending to laptop [Complete]",
-            "Writing to repository [Complete]",
-            "Running verification [Complete]"
-        )
-        steps.forEach { step ->
-            val stepRow = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                setPadding(0, 4, 0, 4)
-            }
-            stepRow.addView(createTextView("●  ", color = Color.parseColor("#4EDEA3"), textSize = 10f))
-            stepRow.addView(createTextView(step, color = Color.parseColor("#4EDEA3"), textSize = 12f, mono = true))
-            timelineCard.addView(stepRow)
-        }
-        contentContainer.addView(timelineCard)
-
-        val btnRunAgain = Button(this).apply {
-            text = "▶  Run Again"
-            setTextColor(Color.parseColor("#12131A"))
-            textSize = 13f
-            typeface = Typeface.DEFAULT_BOLD
-            background = GradientDrawable().apply {
-                setColor(Color.parseColor("#ADC6FF"))
-                cornerRadius = 8f
-            }
-            setOnClickListener {
-                isPatchApplied = false
-                switchTab(Tab.SCANNER)
-            }
-            val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 46.dpToPx())
-            lp.setMargins(0, 10, 0, 8)
-            layoutParams = lp
-        }
-        contentContainer.addView(btnRunAgain)
+        PocketQaSessionStore.record("patch", "Exported ${file.name} for review")
+        startActivity(Intent.createChooser(shareIntent, "Export PocketQA patch"))
     }
 
-    // --- TAB 4: ENTERPRISE ANALYTICS ---
+    // Kept as a defensive render target even though the former static analytics tab is hidden.
     private fun renderAnalyticsTab(snapshot: SessionSnapshot) {
-        val headerCard = createCard("PocketQA Enterprise Analytics", "Fleet-wide autonomous test metrics")
+        val headerCard = createCard("Run Summary", "Current on-device PocketQA session")
         contentContainer.addView(headerCard)
 
-        val coverageCard = createAccentCard("Semantics Node Coverage Index", "", borderAccent = Color.parseColor("#3B82F6"))
-        coverageCard.addView(createTextView("94.2%", color = Color.parseColor("#4EDEA3"), textSize = 24f, bold = true))
-        coverageCard.addView(createTextView("12 Analyzed Screens • 142 Active Nodes • 0 Unreachable Handlers", color = Color.parseColor("#C2C6D6"), textSize = 11f))
+        val coverageCard = createAccentCard("Observed Session", "", borderAccent = Color.parseColor("#3B82F6"))
+        coverageCard.addView(createTextView("${snapshot.findings.size} findings", color = Color.parseColor("#4EDEA3"), textSize = 24f, bold = true))
+        coverageCard.addView(createTextView("${snapshot.actions.size} recorded events • ${snapshot.status}", color = Color.parseColor("#C2C6D6"), textSize = 11f))
         contentContainer.addView(coverageCard)
     }
 

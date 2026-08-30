@@ -33,14 +33,10 @@ class HomeScreen extends StatelessWidget {
                         children: [
                           Row(
                             children: [
-                              Container(
-                                width: 28,
-                                height: 28,
-                                decoration: const BoxDecoration(
-                                  color: QuickCartTheme.primaryGreen,
-                                  shape: BoxShape.circle,
-                                ),
-                                child: const Icon(Icons.flash_on, size: 18, color: Colors.white),
+                              SizedBox(
+                                width: 32,
+                                height: 32,
+                                child: Image.asset('assets/branding/quickcart_logo.png'),
                               ),
                               const SizedBox(width: 8),
                               const Text(

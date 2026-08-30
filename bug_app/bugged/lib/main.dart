@@ -22,8 +22,16 @@ void main() async {
   runApp(const QuickCartApp());
 }
 
+bool shouldShowMainNavigation({
+  required bool demoMode,
+  required bool authenticated,
+}) =>
+    demoMode || authenticated;
+
 class QuickCartApp extends StatelessWidget {
-  const QuickCartApp({super.key});
+  const QuickCartApp({super.key, this.demoMode = false});
+
+  final bool demoMode;
 
   @override
   Widget build(BuildContext context) {
@@ -57,7 +65,10 @@ class QuickCartApp extends StatelessWidget {
                 ),
               );
             }
-            if (auth.isAuthenticated) {
+            if (shouldShowMainNavigation(
+              demoMode: demoMode,
+              authenticated: auth.isAuthenticated,
+            )) {
               return const MainNavigationShell();
             }
             return const WelcomeScreen();

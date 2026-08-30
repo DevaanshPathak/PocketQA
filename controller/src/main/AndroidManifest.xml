@@ -1,11 +1,11 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
-    <uses-permission android:name="com.pocketqa.pocketqa.permission.READ_CRASH_REPORT" />
+    <uses-permission android:name="com.quickcart.buggyapp.permission.READ_CRASH_REPORT" />
     <queries>
         <package android:name="com.pocketqa.pocketqa" />
         <package android:name="com.quickcart.buggyapp" />
     </queries>
-    <application android:theme="@style/AppTheme" android:label="PocketQA Proof">
+    <application android:theme="@style/AppTheme" android:label="PocketQA" android:icon="@mipmap/ic_launcher">
         <uses-native-library android:name="libvndksupport.so" android:required="false" />
         <uses-native-library android:name="libOpenCL.so" android:required="false" />
         <uses-native-library android:name="libcdsprpc.so" android:required="false" />

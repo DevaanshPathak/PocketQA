@@ -83,7 +83,7 @@ class PocketQaAccessibilityService : AccessibilityService() {
         PocketQaSessionStore.start(goal, mode)
         PocketQaSessionStore.setVisualFallback(false)
         PocketQaSessionStore.record("run", "Starting ${goal.title} with ${mode.label}")
-        testingOverlay.show("PocketQA AI\nPlanning test trace…")
+        testingOverlay.show("PocketQA\nPlanning test trace…")
         handler.removeCallbacks(timeoutRunnable)
         activeTimeoutMs = when (mode) {
             ExplorationMode.GEMMA_ASSISTED -> GUIDED_GEMMA_RUN_TIMEOUT_MS
@@ -110,7 +110,7 @@ class PocketQaAccessibilityService : AccessibilityService() {
         // The action budget is an internal safety guard, not a user-facing
         // completion target. The UI should describe current work only.
         val stepProgress = "Task ${actionCount + 1}"
-        testingOverlay.show("PocketQA AI\nObserving ${snapshot.label ?: "screen"}\n$stepProgress")
+        testingOverlay.show("PocketQA\nObserving ${snapshot.label ?: "screen"}\n$stepProgress")
         Log.d(TAG, "STATE ${step.name}:\n${TreeFormatter.format(snapshot)}")
 
         if (explorationMode == ExplorationMode.GEMMA_AUTONOMOUS) {
@@ -346,7 +346,7 @@ class PocketQaAccessibilityService : AccessibilityService() {
         }
         gemmaPlanningInFlight = true
         PocketQaSessionStore.record("model", "Gemma is selecting a visible QuickCart product action")
-        testingOverlay.show("PocketQA AI\nGemma inspecting QuickCart locally…")
+        testingOverlay.show("PocketQA\nGemma inspecting QuickCart locally…")
         modelRuntime.initialize { load ->
             if (load !is ModelLoadResult.Ready) {
                 handler.post { applyGemmaQuickCartChoice(null, "model unavailable") }
@@ -426,7 +426,7 @@ class PocketQaAccessibilityService : AccessibilityService() {
                 autonomousInitialProbeScheduled = true
                 gemmaPlanningInFlight = true
                 PocketQaSessionStore.record("wait", "Waiting for the target app's first actionable semantics frame")
-                testingOverlay.show("PocketQA AI\nWaiting for app controls…")
+        testingOverlay.show("PocketQA\nWaiting for app controls…")
                 handler.postDelayed({
                     if (!running || explorationMode != ExplorationMode.GEMMA_AUTONOMOUS) return@postDelayed
                     gemmaPlanningInFlight = false
@@ -442,7 +442,7 @@ class PocketQaAccessibilityService : AccessibilityService() {
         gemmaPlanningInFlight = true
         PocketQaSessionStore.record("model", "Gemma autonomous planner evaluating ${candidates.size} visible actions")
         PocketQaSessionStore.record("model", "Gemma candidates: ${candidates.joinToString(" | ")}")
-        testingOverlay.show("PocketQA AI\nGemma autonomous planning on GPU…")
+        testingOverlay.show("PocketQA\nGemma autonomous planning on GPU…")
         val screenDescription = snapshot.labels().take(MAX_SCREEN_LABELS).joinToString(" | ")
         modelRuntime.initialize { load ->
             if (load !is ModelLoadResult.Ready) {
@@ -565,7 +565,7 @@ class PocketQaAccessibilityService : AccessibilityService() {
         assessment.issueTitle?.let { title ->
             val evidence = assessment.issueEvidence ?: "Gemma flagged this from the current visible UI state."
             found("Gemma: $title", evidence)
-            testingOverlay.show("PocketQA AI\nGemma found a concern\n$title")
+            testingOverlay.show("PocketQA\nGemma found a concern\n$title")
         }
         val choice = assessment.actionLabel
         val coordinate = assessment.actionCoordinate
@@ -686,7 +686,7 @@ class PocketQaAccessibilityService : AccessibilityService() {
         }
         gemmaPlanningInFlight = true
         PocketQaSessionStore.record("model", "Gemma is selecting a visible catalog action")
-        testingOverlay.show("PocketQA AI\nGemma planning locally on GPU…")
+        testingOverlay.show("PocketQA\nGemma planning locally on GPU…")
         modelRuntime.initialize { load ->
             if (load !is ModelLoadResult.Ready) {
                 handler.post { applyGemmaCatalogChoice(null, "model unavailable", candidates) }
@@ -696,7 +696,7 @@ class PocketQaAccessibilityService : AccessibilityService() {
                 if (capture is ScreenshotCapture.CaptureResult.Success) {
                     PocketQaSessionStore.recordScreenshot(capture.file.absolutePath)
                     PocketQaSessionStore.record("visual", "Guided Gemma captured ${capture.width}x${capture.height} for local visual triage")
-                    testingOverlay.show("PocketQA AI\nGemma inspecting screen locally…")
+                    testingOverlay.show("PocketQA\nGemma inspecting screen locally…")
                     modelRuntime.runVisionPrompt(capture.file, GemmaActionPlanner.prompt(snapshot.label ?: "catalog", candidates, capture.width, capture.height)) { result ->
                         val response = (result as? ModelPromptResult.Success)?.text.orEmpty()
                         val choice = GemmaActionPlanner.chooseLabel(response, candidates)
@@ -838,7 +838,7 @@ class PocketQaAccessibilityService : AccessibilityService() {
         running = false
         step = RunStep.COMPLETE
         handler.removeCallbacks(timeoutRunnable)
-        testingOverlay.show("PocketQA AI\nFound ${findings.size} issue(s)\nOpening diagnosis…")
+        testingOverlay.show("PocketQA\nFound ${findings.size} issue(s)\nOpening diagnosis…")
         PocketQaSessionStore.record("run", "Run complete: ${findings.size} findings")
         PocketQaSessionStore.complete()
         Log.i(TAG, "RUN COMPLETE: ${findings.size} findings fixture=$quickCartFixtureStage step=$step")
@@ -850,7 +850,7 @@ class PocketQaAccessibilityService : AccessibilityService() {
     private fun skipCurrentCheck(reason: String) {
         Log.w(TAG, "FIXTURE SKIPPED fixture=$quickCartFixtureStage: $reason")
         PocketQaSessionStore.record("skip", reason)
-        testingOverlay.show("PocketQA AI\nSkipping unavailable check\nNo unsafe action taken")
+        testingOverlay.show("PocketQA\nSkipping unavailable check\nNo unsafe action taken")
         finishRun()
     }
 
@@ -859,7 +859,7 @@ class PocketQaAccessibilityService : AccessibilityService() {
         step = RunStep.IDLE
         handler.removeCallbacks(timeoutRunnable)
         PocketQaSessionStore.fail(message)
-        testingOverlay.show("PocketQA AI\n$message")
+        testingOverlay.show("PocketQA\n$message")
         startActivity(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         handler.postDelayed({ testingOverlay.hide() }, 1800)
     }
@@ -938,7 +938,7 @@ class PocketQaAccessibilityService : AccessibilityService() {
                 PocketQaSessionStore.record("visual", "Evidence screenshot unavailable for $title")
             }
         }
-        testingOverlay.show("PocketQA AI\nIssue found\n$title")
+        testingOverlay.show("PocketQA\nIssue found\n$title")
         Log.i(TAG, "BUG FOUND: $title - $evidence")
     }
 
@@ -1047,7 +1047,7 @@ class PocketQaAccessibilityService : AccessibilityService() {
         if (gemmaPlanningInFlight) return
         gemmaPlanningInFlight = true
         PocketQaSessionStore.record("model", "Gemma 4 E4B is assessing the QuickCart screen before guided coverage")
-        testingOverlay.show("PocketQA AI\nGemma inspecting the live screen locally…")
+        testingOverlay.show("PocketQA\nGemma inspecting the live screen locally…")
         modelRuntime.initialize { load ->
             if (load !is ModelLoadResult.Ready) {
                 handler.post { completeGemmaFixtureAssessment("Model unavailable: ${(load as? ModelLoadResult.Failed)?.message ?: "model missing"}") }
@@ -1175,7 +1175,7 @@ class PocketQaAccessibilityService : AccessibilityService() {
         }
         PocketQaSessionStore.record(kind, detail)
         val actionProgress = "Task $actionCount"
-        testingOverlay.show("PocketQA AI\nReasoning: $kind $detail\n$actionProgress")
+        testingOverlay.show("PocketQA\nReasoning: $kind $detail\n$actionProgress")
         return true
     }
 
@@ -1274,7 +1274,7 @@ class PocketQaAccessibilityService : AccessibilityService() {
         val visibleLabels = snapshot.labels().filter { it.isNotBlank() }.take(10)
         val sparseCount = visibleLabels.size
         PocketQaSessionStore.record("visual", "Sparse semantics detected ($sparseCount labels). Capturing screenshot for visual reasoning.")
-        testingOverlay.show("PocketQA AI\nVisual analysis: capturing screen…")
+        testingOverlay.show("PocketQA\nVisual analysis: capturing screen…")
 
         ScreenshotCapture.capture(this) { captureResult ->
             if (!running) { visualFallbackInFlight = false; return@capture }
@@ -1282,7 +1282,7 @@ class PocketQaAccessibilityService : AccessibilityService() {
                 is ScreenshotCapture.CaptureResult.Success -> {
                     PocketQaSessionStore.recordScreenshot(captureResult.file.absolutePath)
                     PocketQaSessionStore.record("visual", "Screenshot captured (${captureResult.width}x${captureResult.height})")
-                    testingOverlay.show("PocketQA AI\nVisual reasoning on GPU…")
+                    testingOverlay.show("PocketQA\nVisual reasoning on GPU…")
 
                     val prompt = VisualFallbackPrompt.build(
                         packageName = targetPackage,
@@ -1323,21 +1323,21 @@ class PocketQaAccessibilityService : AccessibilityService() {
         when (action) {
             is VisualFallbackPrompt.VisualAction.TapAt -> {
                 PocketQaSessionStore.record("visual", "Visual tap at (${action.x}, ${action.y})")
-                testingOverlay.show("PocketQA AI\nVisual tap (${action.x}, ${action.y})")
+                testingOverlay.show("PocketQA\nVisual tap (${action.x}, ${action.y})")
                 if (consumeAction("visual_tap", "(${action.x}, ${action.y})")) {
                     GestureDispatcher.tapAt(this, action.x, action.y)
                 }
             }
             is VisualFallbackPrompt.VisualAction.ScrollDown -> {
                 PocketQaSessionStore.record("visual", "Visual scroll down")
-                testingOverlay.show("PocketQA AI\nVisual scroll down")
+                testingOverlay.show("PocketQA\nVisual scroll down")
                 if (consumeAction("visual_scroll", "scroll down")) {
                     GestureDispatcher.scrollDown(this, screenWidth, screenHeight)
                 }
             }
             is VisualFallbackPrompt.VisualAction.Back -> {
                 PocketQaSessionStore.record("visual", "Visual BACK navigation")
-                testingOverlay.show("PocketQA AI\nVisual BACK")
+                testingOverlay.show("PocketQA\nVisual BACK")
                 if (consumeAction("visual_back", "GLOBAL_ACTION_BACK")) {
                     performGlobalAction(GLOBAL_ACTION_BACK)
                 }
@@ -1354,7 +1354,7 @@ class PocketQaAccessibilityService : AccessibilityService() {
         visualFallbackInFlight = false
         PocketQaSessionStore.record("visual", "Visual fallback recovery: $reason. Pressing BACK.")
         PocketQaSessionStore.setVisualFallback(false)
-        testingOverlay.show("PocketQA AI\nVisual fallback: recovering…")
+        testingOverlay.show("PocketQA\nVisual fallback: recovering…")
         performGlobalAction(GLOBAL_ACTION_BACK)
     }
 

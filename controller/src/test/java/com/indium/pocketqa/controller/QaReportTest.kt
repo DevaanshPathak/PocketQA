@@ -11,7 +11,7 @@ class QaReportTest {
             running = true
         )
 
-        assertTrue(report.contains("1/14 bugs found"))
+        assertTrue(report.contains("1/6 bugs found"))
         assertTrue(report.contains("Quantity zero boundary failure"))
         assertTrue(report.contains("Rapid cart quantity update race"))
     }

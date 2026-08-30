@@ -23,40 +23,39 @@ if (-not $flutter) {
 }
 
 if (-not (Test-Path $adb)) { throw "adb not found at $adb. Set ANDROID_SDK_ROOT." }
-if (-not (Test-Path $emulator)) { throw "Android emulator not found at $emulator. Set ANDROID_SDK_ROOT." }
 if (-not $flutter -and -not $SkipBuild) { throw "Flutter is required to build bug_app. Add it to PATH, set FLUTTER_ROOT, or use -SkipBuild with an existing APK." }
 
-if (-not $AvdName) {
-    $AvdName = (& $emulator -list-avds | Select-Object -First 1)
-}
-if (-not $AvdName) { throw "No Android Virtual Device exists. Create one in Android Studio Device Manager." }
-
 & $adb start-server | Out-Null
-$deviceMatch = & $adb devices | Select-String '^emulator-\d+\s+device' | Select-Object -First 1
+$deviceMatch = & $adb devices | Select-String '^\S+\s+device$' | Select-Object -First 1
 $serial = if ($deviceMatch) { $deviceMatch.ToString().Split("`t")[0] } else { $null }
 if (-not $serial) {
+    if (-not (Test-Path $emulator)) { throw "Android emulator not found at $emulator. Set ANDROID_SDK_ROOT." }
+    if (-not $AvdName) {
+        $AvdName = (& $emulator -list-avds | Select-Object -First 1)
+    }
+    if (-not $AvdName) { throw "No Android device is connected and no AVD exists." }
     Write-Host "Starting emulator: $AvdName"
     Start-Process -FilePath $emulator -ArgumentList @('-avd', $AvdName) -WindowStyle Hidden
     & $adb wait-for-device
     $deadline = (Get-Date).AddMinutes(4)
     do {
         Start-Sleep -Seconds 2
-        $deviceMatch = & $adb devices | Select-String '^emulator-\d+\s+device' | Select-Object -First 1
+        $deviceMatch = & $adb devices | Select-String '^\S+\s+device$' | Select-Object -First 1
         $serial = if ($deviceMatch) { $deviceMatch.ToString().Split("`t")[0] } else { $null }
         $booted = if ($serial) { (& $adb -s $serial shell getprop sys.boot_completed 2>$null).Trim() } else { "" }
     } until ($booted -eq '1' -or (Get-Date) -gt $deadline)
     if ($booted -ne '1') { throw "Emulator did not finish booting within four minutes." }
 }
-Write-Host "Using emulator: $serial"
+Write-Host "Using Android device: $serial"
 
-$bugApk = Join-Path $repoRoot "bug_app\build\app\outputs\flutter-apk\app-debug.apk"
+$bugApk = Join-Path $repoRoot "bug_app\bugged\build\app\outputs\flutter-apk\app-debug.apk"
 $controllerApk = Join-Path $repoRoot "controller\build\outputs\apk\debug\controller-debug.apk"
 if (-not $SkipBuild) {
-    Push-Location (Join-Path $repoRoot "bug_app")
+    Push-Location (Join-Path $repoRoot "bug_app\bugged")
     try {
         & $flutter.Source pub get
         if ($LASTEXITCODE -ne 0) { throw "flutter pub get failed" }
-        & $flutter.Source build apk --debug -t lib/main_buggy.dart
+        & $flutter.Source build apk --debug -t lib/main_demo.dart
         if ($LASTEXITCODE -ne 0) { throw "bug_app build failed" }
     } finally { Pop-Location }
 
@@ -75,7 +74,7 @@ if ($LASTEXITCODE -ne 0) { throw "Failed to install controller" }
 
 $service = 'com.indium.pocketqa.controller/com.indium.pocketqa.controller.PocketQaAccessibilityService'
 & $adb -s $serial shell am force-stop com.indium.pocketqa.controller
-& $adb -s $serial shell am force-stop com.pocketqa.pocketqa
+& $adb -s $serial shell am force-stop com.quickcart.buggyapp
 & $adb -s $serial shell am start -n com.indium.pocketqa.controller/.MainActivity | Out-Null
 Start-Sleep -Seconds 1
 & $adb -s $serial shell settings put secure accessibility_enabled 0
@@ -94,7 +93,7 @@ if ($accessibilityState -notmatch 'Bound services:\{Service\[label=PocketQA Sema
     $enabledService = (& $adb -s $serial shell settings get secure enabled_accessibility_services).Trim()
     throw "PocketQA accessibility service did not bind within 30 seconds (enabled_accessibility_services=$enabledService)."
 }
-& $adb -s $serial shell am start -n com.pocketqa.pocketqa/.MainActivity | Out-Null
+& $adb -s $serial shell am start -n com.quickcart.buggyapp/com.pocketqa.pocketqa.MainActivity | Out-Null
 Start-Sleep -Seconds 1
 & $adb -s $serial shell am start -n com.indium.pocketqa.controller/.MainActivity | Out-Null
 

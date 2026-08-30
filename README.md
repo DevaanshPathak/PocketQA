@@ -2,33 +2,35 @@
 
 PocketQA is an Android QA controller that drives another installed app through
 `AccessibilityService`, records a structured trace, detects known UI failures, and
-generates source-grounded patches with an on-device Gemma model. Runtime testing and
-local patching work without a laptop or network.
+exports source-grounded patch suggestions. Runtime testing, bundled-source diagnosis,
+and local Gemma guidance work without a laptop or network.
 
-- `bug_app/` is the actual five-bug PocketQA testbed.
+- `bug_app/bugged/` is the QuickCart six-fixture testbed.
 - `controller/` is the native Kotlin controller and local inference app.
 
-The **Open buggy app and run 5 tests** button checks:
+The **Start Exploration** button checks:
 
-1. Only two of three product semantics render after the null-text failure.
-2. Two decrement taps produce a cart quantity of `-1`.
-3. Empty checkout submission produces no validation-error semantics.
-4. **Place Order** remains enabled immediately after a valid submission.
-5. `FREEZE` + **APPLY** produces no target UI update for at least two seconds.
+1. Rapid cart mutations race through a delayed stale snapshot.
+2. Repeated decrement actions exercise the quantity lower-bound failure.
+3. Two quick profile saves enter the duplicate-save path.
+4. Cancelling delivery preferences retains mutated shared state.
+5. The low-semantics Fresh Picks screen exposes a visual hitbox mismatch.
+6. The extended category grid reaches its final off-by-one boundary.
 
-The freeze check runs last. PocketQA then returns to the foreground and displays
-the evidence collected for every detected bug.
+Guided mode performs one real on-device Gemma screen assessment, then uses the
+verified six-fixture trace for repeatability. If the model or screenshot is unavailable,
+the deterministic trace continues and records the fallback.
 
 ## Build
 
-Prerequisites: Flutter 3.x compatible with Dart 3.13, Android SDK 34+, JDK 17+,
+Prerequisites: Flutter 3.x compatible with Dart 3.13, Android SDK 36, JDK 21,
 and an Android phone with USB debugging.
 
 ```powershell
-Push-Location bug_app
+Push-Location bug_app\bugged
 flutter pub get
 flutter test
-flutter build apk --debug -t lib/main_buggy.dart
+flutter build apk --debug -t lib/main_demo.dart
 Pop-Location
 
 .\gradlew.bat :controller:testDebugUnitTest :controller:assembleDebug
@@ -50,11 +52,15 @@ Set `FLUTTER_ROOT` if Flutter is not on `PATH`. The Windows launcher also checks
 Install both APKs:
 
 ```powershell
-adb install -r bug_app\build\app\outputs\flutter-apk\app-debug.apk
+adb install -r bug_app\bugged\build\app\outputs\flutter-apk\app-debug.apk
 adb install -r controller\build\outputs\apk\debug\controller-debug.apk
 ```
 
-## Repository-grounded patches
+## Source-grounded patches
+
+The controller APK bundles the five distinct QuickCart source files used by the six
+demo findings. Diagnosis therefore shows real source evidence and a reviewable diff
+offline, without requiring a repository clone.
 
 In PocketQA's Scanner tab, enter a credential-free HTTPS Git repository URL, a
 branch or tag, and the relative subfolder containing the target app (for example,
@@ -63,15 +69,14 @@ The token is used for that clone only and is not persisted. The shallow clone,
 selected subfolder, and lexical RAG index stay in PocketQA's private app storage.
 The last successful selection is restored when the app restarts.
 
-From a finding, open Diagnosis and choose **Generate patch from indexed repo**.
-PocketQA retrieves relevant source chunks, classifies prompt size, and either:
+Repository indexing is optional. It supports larger source-grounded workflows where
+PocketQA retrieves relevant chunks and either:
 
 - uses the installed Gemma LiteRT model for a small grounded change;
 - uses OpenRouter for a larger change only when the user has enabled BYOK; or
 - abstains when the evidence or configured runtime is insufficient.
 
-Generated text is exposed for save/share only after unified-diff paths are checked
-against the indexed source manifest. OpenRouter keys are encrypted with Android
+OpenRouter keys are encrypted with Android
 Keystore and can be removed with **Clear BYOK key**. Cloud escalation is optional;
 when enabled, the finding, trace, and retrieved source context leave the device.
 
@@ -88,20 +93,22 @@ The server exposes `search_source`, `read_source`, and `validate_patch`. It only
 reads files listed in the generated manifest and rejects path traversal. Configure
 your MCP client to launch the command above over stdio.
 
-## 30-second recording script
+## Demo recording script
 
 1. Open PocketQA and enable **PocketQA Semantics Reader** if needed.
-2. Tap **Open buggy app and run 5 tests**.
-3. Do not touch the emulator while PocketQA drives Catalog, Cart, and Checkout.
-4. PocketQA returns automatically after the final freeze check.
-5. End on the on-device **5/5 bugs found** report.
+2. Select **Guided Gemma QA** and tap **Start Exploration**.
+3. Do not touch the device while PocketQA drives QuickCart.
+4. PocketQA returns automatically after the final category-boundary check.
+5. End on the on-device **6/6 findings** report, open one Diagnosis, and tap
+   **Export Patch** to show the Android share sheet.
 
-To repeat, close the system ANR dialog if it appears, then press the test button again.
+Run this sequence twice before recording. Use deterministic mode as the immediate
+fallback if the local model cannot initialize on the demo device.
 
 ## Current MVP boundaries
 
-PocketQA generates and exports a reviewed `.diff`; it does not automatically modify,
-commit, or push the cloned repository. Guided Gemma navigation remains bounded and
+PocketQA exports a reviewed `.diff`; it does not automatically modify, verify, commit,
+or push a repository. Guided Gemma navigation remains bounded and
 uses deterministic coverage for demo reliability. OpenRouter escalation requires a
 network connection and explicit BYOK opt-in; normal test execution and local Gemma
-diagnosis remain on-device.
+assessment remain on-device.

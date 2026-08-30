@@ -11,8 +11,8 @@ class CrashReportContractTest {
         val validation = CrashReportContract.validate(
             schemaVersion = 1,
             id = "run-42",
-            appPackage = "com.pocketqa.pocketqa",
-            sourceKey = "lib/ui/screens/catalog_screen.dart",
+            appPackage = "com.quickcart.buggyapp",
+            sourceKey = "lib/ui/screens/category/category_screen.dart",
             line = 84,
         )
 
@@ -22,7 +22,7 @@ class CrashReportContractTest {
     @Test
     fun `rejects reports from another app or unsafe source path`() {
         val wrongPackage = CrashReportContract.validate(1, "run-42", "com.example.other", "lib/a.dart", 1)
-        val traversal = CrashReportContract.validate(1, "run-42", "com.pocketqa.pocketqa", "../secrets.dart", 1)
+        val traversal = CrashReportContract.validate(1, "run-42", "com.quickcart.buggyapp", "../secrets.dart", 1)
 
         assertFalse(wrongPackage.isValid)
         assertFalse(traversal.isValid)

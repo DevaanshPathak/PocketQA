@@ -21,24 +21,39 @@ android {
     }
 }
 
-val syncPocketQaSourceCorpus by tasks.registering(Copy::class) {
-    from("../bug_app/lib") {
-        include(
-            "ui/screens/catalog_screen.dart",
-            "ui/screens/cart_screen.dart",
-            "ui/screens/checkout_screen.dart",
-            "state/cart_provider.dart",
-            "ui/widgets/cart_item_tile.dart",
-        )
+val demoSourceKeys = listOf(
+    "providers/cart_provider.dart",
+    "ui/screens/profile/edit_profile_screen.dart",
+    "ui/screens/settings/delivery_preferences_screen.dart",
+    "ui/screens/experimental/low_semantics_screen.dart",
+    "ui/screens/category/category_screen.dart",
+)
+
+val generatedSourceCorpus = layout.buildDirectory.dir("generated/pocketqaSourceCorpus/assets/sources")
+
+val syncPocketQaSourceCorpus by tasks.registering(Sync::class) {
+    from("../bug_app/bugged/lib") {
+        demoSourceKeys.forEach { include(it) }
     }
-    into(layout.buildDirectory.dir("generated/pocketqaSourceCorpus/assets/sources"))
+    into(generatedSourceCorpus)
+}
+
+val verifyPocketQaSourceCorpus by tasks.registering {
+    dependsOn(syncPocketQaSourceCorpus)
+    doLast {
+        val sourceRoot = generatedSourceCorpus.get().asFile
+        val missing = demoSourceKeys.filterNot { sourceRoot.resolve(it).isFile }
+        check(missing.isEmpty()) {
+            "PocketQA demo source corpus is incomplete: ${missing.joinToString()}"
+        }
+    }
 }
 
 android.sourceSets.getByName("main").assets.srcDir(
     layout.buildDirectory.dir("generated/pocketqaSourceCorpus/assets").get().asFile,
 )
 
-tasks.named("preBuild").configure { dependsOn(syncPocketQaSourceCorpus) }
+tasks.named("preBuild").configure { dependsOn(verifyPocketQaSourceCorpus) }
 
 dependencies {
     implementation("androidx.core:core-ktx:1.17.0")

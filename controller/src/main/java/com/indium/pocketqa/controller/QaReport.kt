@@ -12,19 +12,11 @@ data class BugFinding(
 object QaReport {
     val expectedTitles = listOf(
         "Rapid cart quantity update race",
-        "Rapid search request race",
-        "Checkout total stale after cart modification",
-        "Async product load after back navigation",
         "Quantity zero boundary failure",
         "Final list item off-by-one",
-        "Filter changes dataset but not list state",
-        "Profile edit controller reuse",
         "Rapid double save race",
         "Cancelled form mutates shared state",
-        "Double place-order submission",
-        "Checkout summary stale after cart edit",
         "Low-semantics visual hitbox mismatch",
-        "Login authentication validation gap",
     )
 
     fun render(findings: List<BugFinding>, running: Boolean): String = buildString {

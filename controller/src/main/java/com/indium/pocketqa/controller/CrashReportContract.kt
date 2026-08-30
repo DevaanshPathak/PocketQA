@@ -2,10 +2,10 @@ package com.indium.pocketqa.controller
 
 /** Shared v1 boundary contract for Buggy App crash reports. */
 object CrashReportContract {
-    const val targetPackage = "com.pocketqa.pocketqa"
-    const val authority = "com.pocketqa.pocketqa.crashes"
+    const val targetPackage = "com.quickcart.buggyapp"
+    const val authority = "com.quickcart.buggyapp.crashes"
     const val latestUri = "content://$authority/latest"
-    const val readPermission = "com.pocketqa.pocketqa.permission.READ_CRASH_REPORT"
+    const val readPermission = "com.quickcart.buggyapp.permission.READ_CRASH_REPORT"
     const val reportColumn = "report_json"
 
     fun validate(

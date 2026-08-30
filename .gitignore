@@ -6,6 +6,7 @@
 # Build & Gradle
 .gradle/
 .kotlin/
+.cache/
 **/build/
 local.properties
 .env

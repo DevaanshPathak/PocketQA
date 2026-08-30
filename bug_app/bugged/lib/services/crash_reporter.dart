@@ -10,7 +10,7 @@ import 'package:flutter/services.dart';
 class CrashReporter {
   CrashReporter._();
 
-  static const _channel = MethodChannel('com.pocketqa.pocketqa/crash_reports');
+  static const _channel = MethodChannel('com.quickcart.buggyapp/crash_reports');
 
   static void install() {
     FlutterError.onError = (details) {
@@ -59,7 +59,7 @@ class CrashReporter {
       'schemaVersion': 1,
       'id': id ?? '${capturedAt.microsecondsSinceEpoch}-${error.runtimeType}',
       'capturedAtMs': capturedAt.millisecondsSinceEpoch,
-      'appPackage': 'com.pocketqa.pocketqa',
+      'appPackage': 'com.quickcart.buggyapp',
       'fatal': true,
       'exceptionType': error.runtimeType.toString(),
       'message': error.toString(),

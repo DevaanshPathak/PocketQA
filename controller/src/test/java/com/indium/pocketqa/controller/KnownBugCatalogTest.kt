@@ -21,22 +21,39 @@ class KnownBugCatalogTest {
             BugFinding("Cart quantity goes below zero", "QuickCart showed quantity -1"),
         )
 
-        assertEquals("bug_app/bugged/lib/providers/cart_provider.dart", diagnosis.sourceKey)
+        assertEquals("lib/providers/cart_provider.dart", diagnosis.sourceKey)
     }
 
     @Test
     fun primaryQuickCartFixturesMapToTheirOwnSourceFiles() {
         assertEquals(
-            "bug_app/bugged/lib/ui/screens/category/category_screen.dart",
+            "lib/ui/screens/category/category_screen.dart",
             KnownBugCatalog.diagnose(BugFinding("Final list off-by-one", "QuickCart boundary")).sourceKey,
         )
         assertEquals(
-            "bug_app/bugged/lib/ui/screens/profile/edit_profile_screen.dart",
+            "lib/ui/screens/profile/edit_profile_screen.dart",
             KnownBugCatalog.diagnose(BugFinding("Rapid double save", "QuickCart profile")).sourceKey,
         )
         assertEquals(
-            "bug_app/bugged/lib/ui/screens/experimental/low_semantics_screen.dart",
+            "lib/ui/screens/experimental/low_semantics_screen.dart",
             KnownBugCatalog.diagnose(BugFinding("Visual hitbox mismatch", "QuickCart Fresh Picks")).sourceKey,
         )
+    }
+
+    @Test
+    fun `every live demo fixture maps to bundled source`() {
+        val findings = listOf(
+            BugFinding("Rapid cart quantity update race", "QuickCart cart"),
+            BugFinding("Quantity zero boundary failure", "QuickCart showed quantity -1"),
+            BugFinding("Rapid double save race", "QuickCart profile"),
+            BugFinding("Cancelled form mutates shared state", "QuickCart preferences"),
+            BugFinding("Low-semantics visual hitbox mismatch", "QuickCart Fresh Picks"),
+            BugFinding("Final list item off-by-one", "QuickCart boundary"),
+        )
+
+        findings.forEach { finding ->
+            val sourceKey = KnownBugCatalog.diagnose(finding).sourceKey
+            assertTrue("Missing bundled source mapping for $sourceKey", SourceCorpusContract.assetFor(sourceKey) != null)
+        }
     }
 }

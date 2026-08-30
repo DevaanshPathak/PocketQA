@@ -14,7 +14,7 @@ void main() {
 
     expect(report['schemaVersion'], 1);
     expect(report['id'], 'report-42');
-    expect(report['appPackage'], 'com.pocketqa.pocketqa');
+    expect(report['appPackage'], 'com.quickcart.buggyapp');
     expect(report['frames'], [
       {
         'sourceKey': 'lib/ui/screens/catalog_screen.dart',
